@@ -4,6 +4,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-13
+
 ### Adicionado
 
 - Servidor SMTP de recebimento na porta 25 (IPv4 e IPv6) com STARTTLS,
@@ -21,3 +23,11 @@ Formato [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
   Caddy.
 - Métricas para o textfile collector do node-exporter.
 - Unit systemd endurecida, Containerfile e `bin/build`/`bin/deploy`.
+- Pacotes `.deb` e `.rpm`, tarball e sha256 por arquitetura (x86_64 e
+  aarch64), publicados por tag.
+- Resolvedor DNS com EDNS sempre ligado, mesmo sem `options edns0` no
+  `/etc/resolv.conf` (sem ele, registros SPF grandes voltam truncados e o
+  DMARC não recusaria remetente falsificado).
+
+[Unreleased]: https://github.com/LLawli/carteiro/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/LLawli/carteiro/releases/tag/v0.1.0
