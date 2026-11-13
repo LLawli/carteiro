@@ -52,7 +52,7 @@ fn nome(r: &DmarcResult) -> &'static str {
 impl Verificador {
     pub fn new(hostname: &str) -> Result<Verificador, String> {
         // Os servidores do /etc/resolv.conf, mas sempre com EDNS: sem
-        // `options edns0` lá (o resolv.conf estático da netcup não tem), o
+        // `options edns0` lá (um resolv.conf estático, como o da netcup, não tem), o
         // hickory consulta sem EDNS, o TXT de SPF grande (o do paypal.com tem
         // 1120 bytes) volta truncado em 512 e vira `temperror`, e aí nada é
         // recusado por DMARC. A nova tentativa por TCP cobre o que passar até

@@ -2,8 +2,10 @@
 Description=carteiro: vigia o certificado do Caddy
 
 [Path]
-# o diretório: o Caddy troca os arquivos por rename
-PathChanged=/srv/data/caddy/data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/mx.lukakuuhaku.dev
+# O diretório, não o arquivo: o Caddy troca os arquivos por rename. Para
+# outro caminho, num drop-in: `PathChanged=` vazio (zera a lista) e depois
+# `PathChanged=<o seu diretório>`.
+PathChanged=/var/lib/caddy/.local/share/caddy/certificates/acme-v02.api.letsencrypt.org-directory/mx.exemplo.com
 Unit=carteiro-certificado.service
 
 [Install]

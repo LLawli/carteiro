@@ -8,6 +8,7 @@ if [ ! -f config/deploy.env ]; then
   echo "falta config/deploy.env (copie config/deploy.env.example)" >&2
   exit 1
 fi
+# shellcheck source=config/deploy.env.example
 . config/deploy.env
 : "${DEPLOY_SSH_HOST:?DEPLOY_SSH_HOST vazio em config/deploy.env}"
 

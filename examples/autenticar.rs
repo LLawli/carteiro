@@ -29,7 +29,7 @@ async fn main() {
     let auth = MessageAuthenticator::new(config, opcoes).unwrap();
     for rodada in 1..=3 {
         let t0 = Instant::now();
-        let p = SpfParameters::mail_from(ip, helo, "mx.lukakuuhaku.dev", de);
+        let p = SpfParameters::mail_from(ip, helo, "mx.exemplo.com", de);
         let spf = auth.verify_spf(p).await;
         println!(
             "rodada {rodada}: spf={} ({:?}) em {:?}",
@@ -42,7 +42,7 @@ async fn main() {
     let msg = AuthenticatedMessage::parse(bruto.as_bytes()).unwrap();
     let dkim = auth.verify_dkim(&msg).await;
     let spf = auth
-        .verify_spf(SpfParameters::mail_from(ip, helo, "mx.lukakuuhaku.dev", de))
+        .verify_spf(SpfParameters::mail_from(ip, helo, "mx.exemplo.com", de))
         .await;
     let dominio = de.rsplit_once('@').unwrap().1;
     let dmarc = auth

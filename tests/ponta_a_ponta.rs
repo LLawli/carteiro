@@ -303,7 +303,7 @@ async fn ambiente(ajuste: impl FnOnce(&mut Config)) -> Ambiente {
     let texto = format!(
         r#"
 hostname = "mx.teste.local"
-dominio = "lukakuuhaku.dev"
+dominio = "exemplo.com"
 enderecos = ["contato", "pix"]
 escutar = ["127.0.0.1:0"]
 espera_banner_ms = 0
@@ -473,7 +473,7 @@ impl Cliente {
 
 fn mensagem(assunto: &str) -> Vec<u8> {
     format!(
-        "From: Remetente <alguem@exemplo.com>\r\nTo: contato@lukakuuhaku.dev\r\nSubject: {assunto}\r\nDate: Fri, 13 Nov 2026 10:00:00 +0000\r\nMessage-ID: <{assunto}@exemplo.com>\r\n\r\nCorpo.\r\n..linha que começava com ponto\r\n"
+        "From: Remetente <alguem@exemplo.com>\r\nTo: contato@exemplo.com\r\nSubject: {assunto}\r\nDate: Fri, 13 Nov 2026 10:00:00 +0000\r\nMessage-ID: <{assunto}@exemplo.com>\r\n\r\nCorpo.\r\n..linha que começava com ponto\r\n"
     )
     .into_bytes()
 }
@@ -505,7 +505,7 @@ async fn entrega_com_starttls_e_label_do_subendereco() {
     let (cod, r) = c
         .mandar(
             "alguem@exemplo.com",
-            &["Contato+Banco@LukaKuuhaku.dev"],
+            &["Contato+Banco@Exemplo.COM"],
             &mensagem("um"),
         )
         .await;
@@ -532,7 +532,7 @@ async fn entrega_com_starttls_e_label_do_subendereco() {
     );
     assert_eq!(
         cabecalho(&bruto, "Delivered-To"),
-        ["Delivered-To: contato+banco@lukakuuhaku.dev"]
+        ["Delivered-To: contato+banco@exemplo.com"]
     );
     assert!(bruto.starts_with("Return-Path:"));
     let received = &bruto[bruto.find("Received:").unwrap()..bruto.find("From:").unwrap()];
@@ -546,7 +546,7 @@ async fn entrega_com_starttls_e_label_do_subendereco() {
     );
     assert!(received.contains("version=TLSv1_3"), "{received}");
     assert!(
-        received.contains("for <contato+banco@lukakuuhaku.dev>"),
+        received.contains("for <contato+banco@exemplo.com>"),
         "{received}"
     );
     assert_eq!(a.fila(), 0);
@@ -560,9 +560,9 @@ async fn dois_destinatarios_um_import_com_as_duas_labels() {
         .mandar(
             "alguem@exemplo.com",
             &[
-                "contato@lukakuuhaku.dev",
-                "pix+nubank@lukakuuhaku.dev",
-                "contato@lukakuuhaku.dev",
+                "contato@exemplo.com",
+                "pix+nubank@exemplo.com",
+                "contato@exemplo.com",
             ],
             &mensagem("dois"),
         )
@@ -589,15 +589,15 @@ async fn nunca_relay_e_so_os_enderecos_da_config() {
     let a = ambiente(|_| {}).await;
     let mut c = a.cliente().await;
     assert_eq!(c.cmd("EHLO cliente.exemplo.com").await.0, 250);
-    assert_eq!(c.cmd("RCPT TO:<contato@lukakuuhaku.dev>").await.0, 503);
+    assert_eq!(c.cmd("RCPT TO:<contato@exemplo.com>").await.0, 503);
     assert_eq!(c.cmd("MAIL FROM:<alguem@exemplo.com>").await.0, 250);
     for (para, esperado) in [
         ("alguem@gmail.com", "550 5.7.1"),
-        ("contato@lukakuuhaku.dev.evil.com", "550 5.7.1"),
-        ("contato@sub.lukakuuhaku.dev", "550 5.7.1"),
-        ("admin@lukakuuhaku.dev", "550 5.1.1"),
-        ("postmaster@lukakuuhaku.dev", "550 5.1.1"),
-        ("contato%gmail.com@lukakuuhaku.dev", "550 5.1.1"),
+        ("contato@exemplo.com.evil.com", "550 5.7.1"),
+        ("contato@sub.exemplo.com", "550 5.7.1"),
+        ("admin@exemplo.com", "550 5.1.1"),
+        ("postmaster@exemplo.com", "550 5.1.1"),
+        ("contato%gmail.com@exemplo.com", "550 5.1.1"),
     ] {
         let (_, r) = c.cmd(&format!("RCPT TO:<{para}>")).await;
         assert!(r.starts_with(esperado), "{para}: {r}");
@@ -617,7 +617,7 @@ async fn helo_invalido_ou_com_o_nosso_nome() {
     assert_eq!(c.cmd("EHLO localhost").await.0, 501);
     assert_eq!(c.cmd("EHLO").await.0, 501);
     assert_eq!(c.cmd("EHLO mx.teste.local").await.0, 550);
-    assert_eq!(c.cmd("HELO lukakuuhaku.dev").await.0, 550);
+    assert_eq!(c.cmd("HELO exemplo.com").await.0, 550);
     assert_eq!(c.cmd("EHLO [127.0.0.1]").await.0, 550, "o nosso próprio IP");
     assert_eq!(c.cmd("MAIL FROM:<a@b.c>").await.0, 503, "sem HELO aceito");
     assert_eq!(c.cmd("HELO [192.0.2.1]").await.0, 250);
@@ -632,7 +632,7 @@ async fn limite_de_tamanho() {
     assert!(r.starts_with("552 5.3.4"), "{r}");
     // sem SIZE declarado: o corpo passa do limite no meio do DATA
     assert_eq!(c.cmd("MAIL FROM:<a@exemplo.com>").await.0, 250);
-    assert_eq!(c.cmd("RCPT TO:<pix@lukakuuhaku.dev>").await.0, 250);
+    assert_eq!(c.cmd("RCPT TO:<pix@exemplo.com>").await.0, 250);
     assert_eq!(c.cmd("DATA").await.0, 354);
     c.enviar(&vec![b'x'; 3000]).await;
     c.enviar(b"\r\n.\r\n").await;
@@ -653,7 +653,7 @@ async fn pipelining() {
     let mut c = a.cliente().await;
     assert_eq!(c.cmd("EHLO cliente.exemplo.com").await.0, 250);
     c.enviar(
-        b"MAIL FROM:<a@exemplo.com>\r\nRCPT TO:<pix@lukakuuhaku.dev>\r\nRCPT TO:<x@outro.com>\r\nDATA\r\n",
+        b"MAIL FROM:<a@exemplo.com>\r\nRCPT TO:<pix@exemplo.com>\r\nRCPT TO:<x@outro.com>\r\nDATA\r\n",
     )
     .await;
     assert_eq!(c.resposta().await.0, 250);
@@ -676,7 +676,7 @@ async fn gmail_fora_do_ar_fica_na_fila_e_entra_depois() {
     let (cod, r) = c
         .mandar(
             "alguem@exemplo.com",
-            &["pix@lukakuuhaku.dev"],
+            &["pix@exemplo.com"],
             &mensagem("fila"),
         )
         .await;
@@ -701,7 +701,7 @@ async fn gmail_recusa_a_mensagem_durante_a_sessao() {
     let (cod, r) = c
         .mandar(
             "alguem@exemplo.com",
-            &["pix@lukakuuhaku.dev"],
+            &["pix@exemplo.com"],
             &mensagem("ruim"),
         )
         .await;
@@ -723,7 +723,7 @@ async fn label_invalida_e_temporaria_e_recarrega_as_labels() {
     let (cod, r) = c
         .mandar(
             "alguem@exemplo.com",
-            &["pix@lukakuuhaku.dev"],
+            &["pix@exemplo.com"],
             &mensagem("label"),
         )
         .await;
@@ -744,7 +744,7 @@ async fn gmail_lento_responde_250_e_nao_duplica() {
     let (cod, r) = c
         .mandar(
             "alguem@exemplo.com",
-            &["pix@lukakuuhaku.dev"],
+            &["pix@exemplo.com"],
             &mensagem("lenta"),
         )
         .await;
@@ -756,7 +756,7 @@ async fn gmail_lento_responde_250_e_nao_duplica() {
     let (cod, r) = c
         .mandar(
             "alguem@exemplo.com",
-            &["pix@lukakuuhaku.dev"],
+            &["pix@exemplo.com"],
             &mensagem("rapida"),
         )
         .await;
@@ -781,7 +781,7 @@ async fn recusa_depois_do_250_vai_para_falhou() {
     let (cod, _) = c
         .mandar(
             "alguem@exemplo.com",
-            &["pix@lukakuuhaku.dev"],
+            &["pix@exemplo.com"],
             &mensagem("tarde"),
         )
         .await;
@@ -798,7 +798,7 @@ async fn token_renovado_depois_de_401() {
     let a = ambiente(|_| {}).await;
     let mut c = a.cliente().await;
     assert_eq!(
-        c.mandar("a@exemplo.com", &["pix@lukakuuhaku.dev"], &mensagem("t1"))
+        c.mandar("a@exemplo.com", &["pix@exemplo.com"], &mensagem("t1"))
             .await
             .0,
         250
@@ -808,7 +808,7 @@ async fn token_renovado_depois_de_401() {
     a.mock.lock().unwrap().token_valido = None;
     let mut c = a.cliente().await;
     let (cod, r) = c
-        .mandar("a@exemplo.com", &["pix@lukakuuhaku.dev"], &mensagem("t2"))
+        .mandar("a@exemplo.com", &["pix@exemplo.com"], &mensagem("t2"))
         .await;
     assert_eq!(cod, 250, "{r}");
     assert!(r.contains("delivered"), "{r}");
@@ -828,7 +828,7 @@ async fn mensagem_grande_vai_por_resumable() {
     }
     let mut c = a.cliente().await;
     let (cod, r) = c
-        .mandar("a@exemplo.com", &["contato@lukakuuhaku.dev"], &corpo)
+        .mandar("a@exemplo.com", &["contato@exemplo.com"], &corpo)
         .await;
     assert_eq!(cod, 250, "{r}");
     let i = a.imports();
@@ -847,13 +847,9 @@ async fn fila_sobrevive_a_reinicio() {
     a.mock.lock().unwrap().modo = Modo::Erro500;
     let mut c = a.cliente().await;
     assert_eq!(
-        c.mandar(
-            "a@exemplo.com",
-            &["pix@lukakuuhaku.dev"],
-            &mensagem("reinicio")
-        )
-        .await
-        .0,
+        c.mandar("a@exemplo.com", &["pix@exemplo.com"], &mensagem("reinicio"))
+            .await
+            .0,
         250
     );
     drop(c);
@@ -909,8 +905,8 @@ async fn limite_de_conexoes_por_ip() {
 async fn limite_diario_de_labels_novas() {
     let a = ambiente(|c| c.labels_novas_por_dia = 1).await;
     for (para, assunto) in [
-        ("contato+a@lukakuuhaku.dev", "a"),
-        ("contato+b@lukakuuhaku.dev", "b"),
+        ("contato+a@exemplo.com", "a"),
+        ("contato+b@exemplo.com", "b"),
     ] {
         let mut c = a.cliente().await;
         assert_eq!(

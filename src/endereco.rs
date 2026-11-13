@@ -168,41 +168,41 @@ mod testes {
 
     #[test]
     fn destino_aceita_so_o_dominio_e_os_enderecos() {
-        let d = destino("Contato+Banco@LukaKuuhaku.dev", "lukakuuhaku.dev", &end()).unwrap();
+        let d = destino("Contato+Banco@Exemplo.COM", "exemplo.com", &end()).unwrap();
         assert_eq!(d.base, "contato");
         assert_eq!(d.sub.as_deref(), Some("banco"));
-        assert_eq!(d.endereco, "contato+banco@lukakuuhaku.dev");
+        assert_eq!(d.endereco, "contato+banco@exemplo.com");
         assert_eq!(d.label(), "contato/banco");
         assert_eq!(
-            destino("pix@lukakuuhaku.dev.", "lukakuuhaku.dev", &end())
+            destino("pix@exemplo.com.", "exemplo.com", &end())
                 .unwrap()
                 .label(),
             "pix"
         );
         assert_eq!(
-            destino("pix+@lukakuuhaku.dev", "lukakuuhaku.dev", &end())
+            destino("pix+@exemplo.com", "exemplo.com", &end())
                 .unwrap()
                 .sub,
             None
         );
         assert_eq!(
-            destino("contato@gmail.com", "lukakuuhaku.dev", &end()),
+            destino("contato@gmail.com", "exemplo.com", &end()),
             Err(Recusa::ForaDoDominio)
         );
         assert_eq!(
-            destino("contato@sub.lukakuuhaku.dev", "lukakuuhaku.dev", &end()),
+            destino("contato@sub.exemplo.com", "exemplo.com", &end()),
             Err(Recusa::ForaDoDominio)
         );
         assert_eq!(
-            destino("admin@lukakuuhaku.dev", "lukakuuhaku.dev", &end()),
+            destino("admin@exemplo.com", "exemplo.com", &end()),
             Err(Recusa::Desconhecido)
         );
         assert_eq!(
-            destino("\"contato\"@lukakuuhaku.dev", "lukakuuhaku.dev", &end()),
+            destino("\"contato\"@exemplo.com", "exemplo.com", &end()),
             Err(Recusa::Desconhecido)
         );
         assert_eq!(
-            destino("semarroba", "lukakuuhaku.dev", &end()),
+            destino("semarroba", "exemplo.com", &end()),
             Err(Recusa::ForaDoDominio)
         );
     }

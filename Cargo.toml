@@ -4,7 +4,11 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
 description = "Recebe e-mail por SMTP e entrega na caixa do Gmail pela Gmail API"
-license = "MIT"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/LLawli/carteiro"
+readme = "README.md"
+keywords = ["smtp", "gmail", "mx", "email", "daemon"]
+categories = ["email", "network-programming", "command-line-utilities"]
 
 [dependencies]
 base64 = "0.23.1"

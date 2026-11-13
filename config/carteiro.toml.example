@@ -1,6 +1,6 @@
 # /etc/carteiro/carteiro.toml
-hostname = "mx.lukakuuhaku.dev"
-dominio = "lukakuuhaku.dev"
+hostname = "mx.exemplo.com"
+dominio = "exemplo.com"
 # Só estes recebem (com qualquer +sufixo). Sem catch-all.
 enderecos = ["contato", "pix"]
 

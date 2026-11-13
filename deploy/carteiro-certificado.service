@@ -3,7 +3,9 @@ Description=carteiro: copia o certificado renovado pelo Caddy
 
 [Service]
 Type=oneshot
-# ajuste o diretório e o nome ao seu Caddy
-Environment=ORIGEM=/srv/data/caddy/data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/mx.lukakuuhaku.dev
-Environment=NOME=mx.lukakuuhaku.dev
+# Diretório do certificado no Caddy e o nome do MX. O padrão é o Caddy do
+# pacote Debian; ajuste com `systemctl edit carteiro-certificado.service`
+# (e o PathChanged= de carteiro-certificado.path) se o seu for outro.
+Environment=ORIGEM=/var/lib/caddy/.local/share/caddy/certificates/acme-v02.api.letsencrypt.org-directory/mx.exemplo.com
+Environment=NOME=mx.exemplo.com
 ExecStart=/usr/local/lib/carteiro/copiar-certificado ${ORIGEM} ${NOME}

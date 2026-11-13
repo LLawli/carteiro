@@ -11,11 +11,12 @@ destino=${3:-/etc/carteiro/tls}
 install -d -m 0750 -o root -g carteiro "$destino"
 # a chave primeiro: um STARTTLS entre as duas cópias falha a recarga e fica
 # com o par anterior, e a próxima conexão pega o par novo
-for par in "key chave.pem" "crt cert.pem"; do
-  set -- $par
+copiar() { # <extensão no Caddy> <nome aqui>
   if ! cmp -s "$origem/$nome.$1" "$destino/$2"; then
     install -m 0640 -o root -g carteiro "$origem/$nome.$1" "$destino/.$2.tmp"
     mv -f "$destino/.$2.tmp" "$destino/$2"
     echo "copiado $nome.$1 -> $destino/$2"
   fi
-done
+}
+copiar key chave.pem
+copiar crt cert.pem
