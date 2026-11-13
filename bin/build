@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Binário de release para Debian trixie (a VPS), compilado num container da
+# mesma versão: o desktop tem glibc mais nova e o binário dele não roda lá.
+# Saída: dist/carteiro
+set -euo pipefail
+cd "$(dirname "$0")/.."
+imagem=docker.io/library/rust:1.99-slim-trixie
+mkdir -p dist "$HOME/.cache/carteiro/cargo"
+docker run --rm \
+  --user "$(id -u):$(id -g)" \
+  -e CARGO_HOME=/cargo -e CARGO_TARGET_DIR=/src/target/trixie \
+  -v "$HOME/.cache/carteiro/cargo:/cargo" \
+  -v "$PWD:/src" -w /src \
+  "$imagem" cargo build --release --locked
+cp target/trixie/release/carteiro dist/carteiro
+tamanho=$(stat -c %s dist/carteiro)
+# um build vazio ou quebrado não passa daqui
+if [ "$tamanho" -lt 1000000 ]; then
+  echo "dist/carteiro com $tamanho bytes: build suspeito" >&2
+  exit 1
+fi
+echo "dist/carteiro: $((tamanho / 1024)) KiB, $(dist/carteiro --versao 2>/dev/null || echo 'não roda neste host')"

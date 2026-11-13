@@ -1,0 +1,14 @@
+# Roteamento de memória do ai-memory para este checkout: a memória do
+# carteiro fica no projeto próprio, não no da vps (que só faz o deploy).
+workspace = "default"
+project   = "carteiro"
+
+# Segredos do OAuth e config local nunca viram observação.
+[capture]
+ignore_paths = [
+  "**/*.env",
+  "config/deploy.env",
+  "**/cliente*.json",
+  "**/token*.json",
+  "**/client_secret*.json",
+]

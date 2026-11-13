@@ -1,0 +1,11 @@
+[Unit]
+Description=carteiro: confere o certificado uma vez por dia (reserva do .path)
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=1h
+Persistent=true
+Unit=carteiro-certificado.service
+
+[Install]
+WantedBy=timers.target

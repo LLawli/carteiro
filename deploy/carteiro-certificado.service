@@ -1,0 +1,9 @@
+[Unit]
+Description=carteiro: copia o certificado renovado pelo Caddy
+
+[Service]
+Type=oneshot
+# ajuste o diretório e o nome ao seu Caddy
+Environment=ORIGEM=/srv/data/caddy/data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/mx.lukakuuhaku.dev
+Environment=NOME=mx.lukakuuhaku.dev
+ExecStart=/usr/local/lib/carteiro/copiar-certificado ${ORIGEM} ${NOME}

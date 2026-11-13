@@ -1,0 +1,6 @@
+[advisories]
+# RUSTSEC-2023-0071 (rsa, "Marvin"): canal lateral de tempo em operações com a
+# chave PRIVADA RSA (decifrar, assinar). O carteiro usa o rsa só via mail-auth
+# para VERIFICAR assinaturas DKIM, com a chave pública: não está exposto. Sem
+# versão corrigida. Rever se um dia o carteiro passar a assinar algo.
+ignore = ["RUSTSEC-2023-0071"]

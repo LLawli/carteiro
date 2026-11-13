@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Troca o binário na VPS e reinicia o serviço. A instalação (usuário, units,
+# config, segredos, ufw) é do role carteiro do repositório vps.
+# A fila sobrevive ao reinício: o que já recebeu 250 está em disco.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+if [ ! -f config/deploy.env ]; then
+  echo "falta config/deploy.env (copie config/deploy.env.example)" >&2
+  exit 1
+fi
+. config/deploy.env
+: "${DEPLOY_SSH_HOST:?DEPLOY_SSH_HOST vazio em config/deploy.env}"
+
+bin/build
+controle="$HOME/.ssh/cm-carteiro-%r@%h:%p"
+ssh_() { ssh -o ControlMaster=auto -o ControlPath="$controle" -o ControlPersist=60 "$@"; }
+echo "toque na YubiKey para abrir a conexão"
+ssh_ "$DEPLOY_SSH_HOST" true
+scp -o ControlPath="$controle" dist/carteiro "$DEPLOY_SSH_HOST:/tmp/carteiro.novo"
+ssh_ "$DEPLOY_SSH_HOST" '
+  set -e
+  /tmp/carteiro.novo --versao
+  sudo install -m 0755 /tmp/carteiro.novo /usr/local/bin/carteiro
+  rm -f /tmp/carteiro.novo
+  sudo systemctl restart carteiro
+  sleep 2
+  systemctl is-active carteiro
+  sudo journalctl -u carteiro -o cat -n 3 --no-pager
+'
+ssh_ -O exit "$DEPLOY_SSH_HOST" 2>/dev/null || true

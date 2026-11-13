@@ -1,0 +1,21 @@
+#!/bin/sh
+# Copia o certificado que o Caddy renova para /etc/carteiro/tls, legível pelo
+# grupo carteiro. O Caddy grava a chave 0600 e um ACL não sobreviveria à
+# renovação (a máscara sai dos bits de grupo do arquivo novo). O carteiro
+# percebe o mtime novo no próximo STARTTLS e recarrega sozinho.
+# Uso: copiar-certificado <dir do Caddy> <nome> [destino]
+set -eu
+origem=$1
+nome=$2
+destino=${3:-/etc/carteiro/tls}
+install -d -m 0750 -o root -g carteiro "$destino"
+# a chave primeiro: um STARTTLS entre as duas cópias falha a recarga e fica
+# com o par anterior, e a próxima conexão pega o par novo
+for par in "key chave.pem" "crt cert.pem"; do
+  set -- $par
+  if ! cmp -s "$origem/$nome.$1" "$destino/$2"; then
+    install -m 0640 -o root -g carteiro "$origem/$nome.$1" "$destino/.$2.tmp"
+    mv -f "$destino/.$2.tmp" "$destino/$2"
+    echo "copiado $nome.$1 -> $destino/$2"
+  fi
+done

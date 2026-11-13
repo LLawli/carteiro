@@ -1,0 +1,9 @@
+/target
+/dist
+# segredos do OAuth e config local (os modelos são os .example)
+/config/carteiro.toml
+/config/deploy.env
+cliente*.json
+client_secret*.json
+token*.json
+*.prom

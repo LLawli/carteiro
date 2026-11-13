@@ -1,0 +1,39 @@
+# /etc/carteiro/carteiro.toml
+hostname = "mx.lukakuuhaku.dev"
+dominio = "lukakuuhaku.dev"
+# Só estes recebem (com qualquer +sufixo). Sem catch-all.
+enderecos = ["contato", "pix"]
+
+# Padrão: as duas pilhas na porta 25.
+# escutar = ["0.0.0.0:25", "[::]:25"]
+
+# Limites contra abuso (os valores abaixo são os padrões).
+# tamanho_maximo = 26214400        # 25 MiB, anunciado no EHLO (SIZE)
+# conexoes_maximas = 40
+# conexoes_por_ip = 4              # por /64 no IPv6
+# destinatarios_maximos = 20
+# espera_banner_ms = 1000          # quem fala antes do banner é recusado
+# tempo_comando_s = 120
+# tempo_dados_s = 600
+
+# Entrega. O 250 do DATA sai depois do fsync no spool e espera o Gmail até
+# espera_gmail_s; se o Gmail demorar ou falhar, a mensagem fica na fila.
+# espera_gmail_s = 20
+# espera_retentativa_s = 60        # 1, 2, 5, 10, 30 min, depois de hora em hora
+# desistir_apos_h = 120            # depois disso vai para spool/falhou/
+# labels_novas_por_dia = 20        # labels de +sufixo criadas por dia
+# verificar_autenticacao = true    # SPF/DKIM/DMARC; recusa DMARC p=reject
+
+spool = "/var/lib/carteiro"
+
+# Cópia do certificado do Caddy feita pela carteiro-certificado.path; o
+# carteiro recarrega sozinho quando ela muda.
+certificado = "/etc/carteiro/tls/cert.pem"
+chave = "/etc/carteiro/tls/chave.pem"
+
+# Relativos ao $CREDENTIALS_DIRECTORY da unit (LoadCredential=).
+cliente_oauth = "cliente.json"
+token = "token.json"
+
+# Textfile collector do node-exporter.
+metricas = "/var/lib/node-exporter/carteiro.prom"

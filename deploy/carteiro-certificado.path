@@ -1,0 +1,10 @@
+[Unit]
+Description=carteiro: vigia o certificado do Caddy
+
+[Path]
+# o diretório: o Caddy troca os arquivos por rename
+PathChanged=/srv/data/caddy/data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/mx.lukakuuhaku.dev
+Unit=carteiro-certificado.service
+
+[Install]
+WantedBy=multi-user.target
