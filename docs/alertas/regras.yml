@@ -1,0 +1,23 @@
+# Regras de alerta do carteiro em PromQL, testadas com promtool
+# (testes.yml). Cada expressão devolve um valor positivo quando há problema
+# e nada quando está tudo bem, então a mesma PromQL serve no Grafana com a
+# condição "A > 0" e "sem dados" = OK. As métricas vêm do textfile collector
+# do node-exporter (metricas = ".../carteiro.prom" na config).
+groups:
+  - name: carteiro
+    rules:
+      # O carteiro regrava o .prom a cada 30 s: arquivo velho ou ausente é
+      # processo parado (ou node-exporter sem o textfile collector).
+      - alert: CarteiroParado
+        expr: >-
+          (time() - max(node_textfile_mtime_seconds{file=~".*/carteiro\\.prom"})) > 180
+          or absent(node_textfile_mtime_seconds{file=~".*/carteiro\\.prom"})
+        for: 2m
+      - alert: CarteiroTokenRecusado
+        expr: 1 - max(carteiro_token_ok) > 0
+        for: 5m
+      - alert: CarteiroFilaParada
+        expr: max(carteiro_fila_idade_segundos) > 3600
+        for: 5m
+      - alert: CarteiroMensagemEmFalhou
+        expr: max(carteiro_falhou_mensagens) > 0

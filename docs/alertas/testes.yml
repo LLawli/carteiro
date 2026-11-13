@@ -1,0 +1,77 @@
+# promtool test rules docs/alertas/testes.yml
+rule_files: [regras.yml]
+evaluation_interval: 30s
+tests:
+  # tudo normal: nenhum alerta e nenhuma amostra (o Grafana vê "sem dados")
+  - interval: 30s
+    input_series:
+      - series: 'node_textfile_mtime_seconds{file="/rootfs/var/lib/node-exporter/carteiro.prom"}'
+        values: '0+30x40'
+      - series: carteiro_token_ok
+        values: '1x40'
+      - series: carteiro_fila_idade_segundos
+        values: '0x40'
+      - series: carteiro_falhou_mensagens
+        values: '0x40'
+    alert_rule_test:
+      - { eval_time: 20m, alertname: CarteiroParado, exp_alerts: [] }
+      - { eval_time: 20m, alertname: CarteiroTokenRecusado, exp_alerts: [] }
+      - { eval_time: 20m, alertname: CarteiroFilaParada, exp_alerts: [] }
+      - { eval_time: 20m, alertname: CarteiroMensagemEmFalhou, exp_alerts: [] }
+    promql_expr_test:
+      - expr: 1 - max(carteiro_token_ok) > 0
+        eval_time: 20m
+        exp_samples: []
+
+  # o carteiro para em 5 min: o mtime congela; dispara depois de 3 min de
+  # atraso mais 2 min de espera
+  - interval: 30s
+    input_series:
+      - series: 'node_textfile_mtime_seconds{file="/rootfs/var/lib/node-exporter/carteiro.prom"}'
+        values: '0+30x10 300x30'
+    alert_rule_test:
+      - { eval_time: 9m, alertname: CarteiroParado, exp_alerts: [] }
+      - eval_time: 11m
+        alertname: CarteiroParado
+        exp_alerts: [{ exp_labels: {} }]
+
+  # sem a série (node-exporter sem o arquivo): também é parado
+  - interval: 30s
+    input_series:
+      - series: carteiro_token_ok
+        values: '1x20'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: CarteiroParado
+        exp_alerts: [{ exp_labels: {} }]
+
+  - interval: 30s
+    input_series:
+      - series: carteiro_token_ok
+        values: '1x10 0x20'
+    alert_rule_test:
+      - { eval_time: 7m, alertname: CarteiroTokenRecusado, exp_alerts: [] }
+      - eval_time: 11m
+        alertname: CarteiroTokenRecusado
+        exp_alerts: [{ exp_labels: {} }]
+
+  # fila: idade passa de 1 h aos 61 min (cresce 30 s por amostra)
+  - interval: 30s
+    input_series:
+      - series: carteiro_fila_idade_segundos
+        values: '0+30x140'
+    alert_rule_test:
+      - { eval_time: 64m, alertname: CarteiroFilaParada, exp_alerts: [] }
+      - eval_time: 67m
+        alertname: CarteiroFilaParada
+        exp_alerts: [{ exp_labels: {} }]
+
+  - interval: 30s
+    input_series:
+      - series: carteiro_falhou_mensagens
+        values: '0x4 1x10'
+    alert_rule_test:
+      - { eval_time: 1m, alertname: CarteiroMensagemEmFalhou, exp_alerts: [] }
+      - eval_time: 3m
+        alertname: CarteiroMensagemEmFalhou
+        exp_alerts: [{ exp_labels: {} }]
