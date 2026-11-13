@@ -8,6 +8,7 @@
 
 use mail_auth::dmarc::Policy;
 use mail_auth::dmarc::verify::DmarcParameters;
+use mail_auth::hickory_resolver::system_conf::read_system_conf;
 use mail_auth::spf::verify::SpfParameters;
 use mail_auth::{
     AuthenticatedMessage, AuthenticationResults, DmarcResult, IprevResult, MessageAuthenticator,
@@ -50,8 +51,18 @@ fn nome(r: &DmarcResult) -> &'static str {
 
 impl Verificador {
     pub fn new(hostname: &str) -> Result<Verificador, String> {
-        let auth = MessageAuthenticator::new_system_conf()
-            .map_err(|e| format!("resolvedor DNS do sistema: {e}"))?;
+        // Os servidores do /etc/resolv.conf, mas sempre com EDNS: sem
+        // `options edns0` lá (o resolv.conf estático da netcup não tem), o
+        // hickory consulta sem EDNS, o TXT de SPF grande (o do paypal.com tem
+        // 1120 bytes) volta truncado em 512 e vira `temperror`, e aí nada é
+        // recusado por DMARC. A nova tentativa por TCP cobre o que passar até
+        // do limite do EDNS.
+        let (servidores, mut opcoes) =
+            read_system_conf().map_err(|e| format!("lendo /etc/resolv.conf: {e}"))?;
+        opcoes.edns0 = true;
+        opcoes.try_tcp_on_error = true;
+        let auth = MessageAuthenticator::new(servidores, opcoes)
+            .map_err(|e| format!("resolvedor DNS: {e}"))?;
         Ok(Verificador {
             auth,
             hostname: hostname.to_string(),

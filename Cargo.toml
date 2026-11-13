@@ -25,7 +25,7 @@ webpki-roots = "1.0.12"
 [dev-dependencies]
 axum = "0.8.9"
 rcgen = "0.14.10"
-tokio = { version = "1.54.1", features = ["rt-multi-thread"] }
+tokio = { version = "1.54.1", features = ["macros", "rt", "rt-multi-thread"] }
 
 [profile.release]
 opt-level = "s"
