@@ -46,7 +46,7 @@ medido no NVMe do desktop (LVM, ext4), mediana:
 | 1 MB | 0,11 ms | 5,00 ms |
 | 25 MB | 0,19 ms | 15,50 ms |
 
-No disco da netcup o número absoluto muda; a ordem de grandeza (milissegundos
+Em disco de VPS o número absoluto muda; a ordem de grandeza (milissegundos
 contra as centenas da Gmail API) não.
 
 ## Alternativas (Fase 1)
@@ -59,8 +59,7 @@ bootstrap.
 
 ## Como repetir
 
-Os scripts ficaram fora do repositório (sessão de 13/11/2026). A receita: a
-VM em `~/vms/carteiro` (ver o `LEIA.md` de lá), o mock da Gmail API
+A receita: uma VM com a unit de `deploy/`, um mock da Gmail API
 (`ThreadingHTTPServer` respondendo `/token`, `/gmail/v1/users/me/labels` e
 `/upload/.../messages/import`), e a leitura de `memory.current`,
 `memory.stat` e `cpu.stat` do cgroup `system.slice/carteiro.service` mais

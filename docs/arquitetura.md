@@ -25,7 +25,7 @@ PIPELINING, 8BITMIME) ficou em `src/smtp.rs`.
    antes do banner (1 s) leva `554` e cai.
 2. **EHLO/HELO:** precisa ser FQDN ou literal de IP; HELO com o nosso nome,
    domínio ou IP leva `550`.
-3. **RCPT:** só `@lukakuuhaku.dev` e só as bases da config (`contato`, `pix`);
+3. **RCPT:** só o `dominio` da config e só as bases de `enderecos`;
    o resto do domínio leva `550 5.1.1`, outro domínio `550 5.7.1`.
 4. **DATA:** o corpo vai direto para `spool/tmp/<id>.eml`, sem passar inteiro
    pela memória. Só `CRLF.CRLF` encerra (um LF solto não começa linha), o que
@@ -92,6 +92,6 @@ para isso).
 
 - Recusar por falta de rDNS: derruba remetente pequeno legítimo. O rDNS
   confirmado (iprev) vai para o `Received:` e o `Authentication-Results:`.
-- `postmaster@`: a RFC 5321 pede, mas o domínio só tem `contato` e `pix`.
-  Para aceitar, basta pôr `postmaster` em `enderecos`.
+- `postmaster@`: a RFC 5321 pede, mas o carteiro só aceita o que está em
+  `enderecos`. Para aceitar, basta pôr `postmaster` lá.
 - AUTH, BDAT/CHUNKING, ARC, envio de qualquer tipo.

@@ -1,176 +1,202 @@
 # carteiro
 
-Recebe o e-mail de um domínio por SMTP e põe na caixa do Gmail pela Gmail API
-(`users.messages.import`), sem encaminhar por SMTP. Substitui o Cloudflare
-Email Routing de `lukakuuhaku.dev` (`contato@` e `pix@`, com qualquer
-`+sufixo`) por um processo de ~5 MiB na VPS que **nunca envia e-mail**.
+Para quem tem domínio próprio e lê tudo no Gmail: o carteiro é o servidor de
+recebimento (MX) do domínio. Ele aceita o e-mail por SMTP e põe na caixa do
+Gmail pela Gmail API (`users.messages.import`). Não encaminha por SMTP, então
+não quebra SPF/DMARC e não precisa de SRS. Também **nunca envia e-mail**, então
+a reputação do IP da VPS não importa. É um processo de ~6 MiB de RAM.
 
-- `contato+banco@` chega na caixa de entrada com a label `contato/banco`
-  (criada se não existir); `pix@` com a label `pix`.
-- Só aceita `@lukakuuhaku.dev` e só os endereços da config (nunca é relay).
-- O `250` sai depois da mensagem gravada em disco (fsync). Se o Gmail
-  responder em até 20 s, o `250` já traz o id do Gmail; se demorar ou estiver
-  fora, a mensagem fica na fila e entra depois. Se o Gmail recusar a mensagem
+Nasceu para substituir o Cloudflare Email Routing num domínio pessoal.
+
+- `contato+banco@exemplo.com` chega na caixa de entrada com a label
+  `contato/banco` (criada se não existir).
+- Só aceita o seu domínio e só os endereços da config: nunca é relay, e não
+  tem catch-all.
+- O `250` só sai depois da mensagem gravada em disco. Se o Gmail responder em
+  até 20 s, o `250` já traz o id do Gmail. Se o Gmail demorar ou estiver fora,
+  a mensagem fica na fila e entra depois. Se o Gmail recusar a mensagem
   durante a sessão, quem mandou recebe `554` e o bounce sai do servidor dele.
 - Verifica SPF, DKIM e DMARC (o Gmail não vê o IP de quem mandou) e recusa o
-  que falha com `p=reject`. O filtro de spam do Gmail continua decidindo o
-  resto (sem `neverMarkSpam`).
+  que falha com `p=reject`. O filtro de spam do Gmail decide o resto.
 
 Arquitetura e decisões em [docs/arquitetura.md](docs/arquitetura.md); consumo
 medido em [docs/medicoes.md](docs/medicoes.md).
 
-## 1. Credenciais do Google (uma vez)
+## Instalar
 
-1. Em <https://console.cloud.google.com>, crie um projeto e ative a **Gmail
-   API**.
-2. **Google Auth Platform → Branding/Audience**: tipo **External**, com o seu
-   Gmail como usuário. Em **Data access**, adicione os escopos
-   `https://www.googleapis.com/auth/gmail.insert` e
-   `https://www.googleapis.com/auth/gmail.labels`.
-3. **Audience → Publish app**: o app precisa ficar **In production**. Em
-   *Testing*, o refresh token expira em 7 dias e o carteiro para de entregar.
-   Não precisa passar pela verificação do Google: na autorização aparece o
-   aviso de app não verificado, e é só seguir (*Avançado → Acessar*).
-4. **Clients → Create client → Desktop app**. Baixe o JSON.
-5. No desktop (precisa de navegador):
-
-   ```sh
-   bin/build
-   dist/carteiro autorizar ~/Downloads/client_secret_*.json token.json
-   ```
-
-   Abra a URL, autorize com a conta do Gmail de destino. O `token.json` (0600)
-   tem o refresh token. Os dois arquivos vão para o vault do repositório
-   `vps` (ver passo 2) e nunca para este repositório.
-
-## 2. Instalar na VPS
-
-O role `carteiro` do repositório `vps` instala tudo: usuário `carteiro`,
-binário, `/etc/carteiro/carteiro.toml`, os segredos (`root` 0600, entregues
-ao serviço por `LoadCredential=`), as units e a porta 25 no ufw:
+Linux com systemd. Pacotes de cada versão em
+[Releases](https://github.com/LLawli/carteiro/releases), para x86_64 e
+arm64:
 
 ```sh
-bin/build                       # dist/carteiro, compilado para Debian trixie
-cd ../vps
-ansible-vault edit inventory/group_vars/all/vault.yml   # carteiro_cliente_oauth, carteiro_refresh_token
-ansible-playbook playbooks/site.yml --tags carteiro
+# Debian 12+ / Ubuntu 22.04+
+sudo apt install ./carteiro_<versão>_amd64.deb
+# Fedora / RHEL
+sudo dnf install ./carteiro-<versão>-1.x86_64.rpm
+# do código
+cargo install --locked --git https://github.com/LLawli/carteiro
 ```
 
-Sem Ansible, o equivalente à mão:
+O pacote cria o usuário `carteiro`, instala o binário em `/usr/bin`, as units
+systemd e um `/etc/carteiro/carteiro.toml` para editar. Não liga nada
+sozinho.
+
+<details>
+<summary>À mão, pelo tarball</summary>
 
 ```sh
+tar -xzf carteiro-v<versão>-x86_64-unknown-linux-gnu.tar.gz
+cd carteiro-v<versão>-x86_64-unknown-linux-gnu
 sudo useradd --system --home-dir /var/lib/carteiro --shell /usr/sbin/nologin carteiro
-sudo install -m 0755 dist/carteiro /usr/local/bin/carteiro
+sudo install -m 0755 carteiro /usr/local/bin/carteiro
 sudo install -d -m 0755 /etc/carteiro /usr/local/lib/carteiro
-sudo install -m 0644 config/carteiro.toml.example /etc/carteiro/carteiro.toml   # e edite
-sudo install -m 0600 client_secret.json /etc/carteiro/cliente.json
-sudo install -m 0600 token.json /etc/carteiro/token.json
+sudo install -d -m 0750 -g carteiro /etc/carteiro/tls
+sudo install -m 0644 config/carteiro.toml.example /etc/carteiro/carteiro.toml
 sudo install -m 0755 deploy/copiar-certificado /usr/local/lib/carteiro/
 sudo install -m 0644 deploy/*.service deploy/*.path deploy/*.timer /etc/systemd/system/
 sudo systemctl daemon-reload
+```
+
+</details>
+
+## Configurar
+
+### 1. Credenciais do Google
+
+1. Em <https://console.cloud.google.com>, crie um projeto e ative a **Gmail
+   API**.
+2. **Google Auth Platform**: público **External**. Em **Data access**,
+   adicione os escopos `https://www.googleapis.com/auth/gmail.insert` e
+   `https://www.googleapis.com/auth/gmail.labels`.
+3. **Audience → Publish app**: o app precisa ficar **In production**. Em
+   *Testing*, o refresh token expira em 7 dias e o carteiro para de
+   entregar. Não precisa da verificação do Google: na autorização aparece o
+   aviso de app não verificado, e é só seguir (*Avançado → Acessar*).
+4. **Clients → Create client → Desktop app**. Baixe o JSON.
+5. Numa máquina com navegador (o retorno vai para `127.0.0.1`):
+
+   ```sh
+   carteiro autorizar client_secret_*.json token.json
+   ```
+
+   Abra a URL e autorize com a conta do Gmail de destino. O `token.json`
+   (0600) tem o refresh token.
+6. No servidor, os dois arquivos ficam em `/etc/carteiro`, `root` 0600. A unit
+   os entrega ao serviço por `LoadCredential=`:
+
+   ```sh
+   sudo install -m 0600 client_secret_*.json /etc/carteiro/cliente.json
+   sudo install -m 0600 token.json /etc/carteiro/token.json
+   ```
+
+### 2. Config
+
+`/etc/carteiro/carteiro.toml`: `hostname` (o nome do MX), `dominio` e
+`enderecos` (as partes locais aceitas). O resto tem padrão; ver
+[config/carteiro.toml.example](config/carteiro.toml.example).
+
+### 3. Certificado
+
+O STARTTLS usa o certificado do nome do MX. Com o Caddy, basta um site
+`mx.exemplo.com { respond 404 }` para ele emitir e renovar. A
+`carteiro-certificado.path` copia o par renovado para `/etc/carteiro/tls`
+(`root:carteiro` 0640), e o carteiro recarrega no próximo STARTTLS, sem
+reiniciar. Um timer diário repete a cópia por garantia. O caminho padrão é o
+do Caddy do Debian; para outro, use `systemctl edit`:
+
+```ini
+# carteiro-certificado.service
+[Service]
+Environment=ORIGEM=/caminho/certificates/acme-v02.api.letsencrypt.org-directory/mx.exemplo.com
+Environment=NOME=mx.exemplo.com
+# carteiro-certificado.path
+[Path]
+PathChanged=
+PathChanged=/caminho/certificates/acme-v02.api.letsencrypt.org-directory/mx.exemplo.com
+```
+
+O Caddy grava a chave 0600; por isso a cópia, e não uma ACL (a ACL não
+sobrevive à renovação). Sem certificado, o carteiro recebe sem STARTTLS.
+
+### 4. Subir
+
+```sh
 sudo systemctl enable --now carteiro-certificado.path carteiro-certificado.timer
 sudo systemctl start carteiro-certificado.service
 sudo CREDENTIALS_DIRECTORY=/etc/carteiro carteiro verificar /etc/carteiro/carteiro.toml
 sudo systemctl enable --now carteiro
 ```
 
-O certificado é o do Caddy: um site `mx.lukakuuhaku.dev` no Caddyfile faz ele
-emitir e renovar. A unit `carteiro-certificado.path` copia o par renovado para
-`/etc/carteiro/tls` (`root:carteiro` 0640) e o carteiro recarrega no próximo
-STARTTLS, sem reiniciar. Um timer diário repete a cópia por garantia.
+`carteiro verificar` testa config, certificado e token, e cria as labels
+base no Gmail. Se outro MTA ocupar a porta 25 (o exim4 do Debian escuta em
+`127.0.0.1:25`), desligue o daemon dele: `systemctl disable --now exim4`. A
+entrega local (cron) continua pelo `sendmail`.
 
-`carteiro verificar` testa config, certificado, spool e token, e cria as
-labels `contato` e `pix`. Fora da unit, `CREDENTIALS_DIRECTORY=/etc/carteiro`
-faz os caminhos relativos dos segredos acharem os arquivos.
+## Testar antes de trocar o MX
 
-Atualizar só o binário depois: `bin/deploy` (lê `config/deploy.env`).
-
-## 3. Testar antes de trocar o MX
-
-Com o MX ainda na Cloudflare, nada externo chega na VPS. Teste direto contra
-o IP dela (da própria VPS, porque provedor residencial costuma bloquear a
-saída na porta 25):
+Com o MX antigo no ar, nada externo chega no carteiro. Teste direto contra o
+IP do servidor, de uma máquina **fora de rede residencial** (provedor
+doméstico costuma bloquear a saída na porta 25):
 
 ```sh
-ssh vps
-sudo apt install swaks
 # entrega com STARTTLS e label de subendereço
-swaks -s 62.83.47.20 --helo teste.lukakuuhaku.dev -tls \
-  -f teste@example.invalid -t contato+teste@lukakuuhaku.dev --h-Subject "carteiro 1"
-# relay: tem de dar 550 5.7.1
-swaks -s 62.83.47.20 --helo teste.lukakuuhaku.dev -f a@example.invalid -t alguem@gmail.com --quit-after RCPT
+swaks -s <IP> --helo teste.exemplo.com -tls \
+  -f teste@example.invalid -t contato+teste@exemplo.com --h-Subject "carteiro 1"
+# relay: 550 5.7.1
+swaks -s <IP> --helo teste.exemplo.com -f a@example.invalid -t alguem@gmail.com --quit-after RCPT
 # endereço que não existe: 550 5.1.1
-swaks -s 62.83.47.20 --helo teste.lukakuuhaku.dev -f a@example.invalid -t admin@lukakuuhaku.dev --quit-after RCPT
+swaks -s <IP> --helo teste.exemplo.com -f a@example.invalid -t admin@exemplo.com --quit-after RCPT
 # remetente falso de domínio com DMARC p=reject: 550 5.7.1
-swaks -s 62.83.47.20 --helo teste.lukakuuhaku.dev -f service@paypal.com \
-  -t pix@lukakuuhaku.dev --header "From: service@paypal.com"
+swaks -s <IP> --helo teste.exemplo.com -f service@paypal.com \
+  -t contato@exemplo.com --header "From: service@paypal.com"
 journalctl -u carteiro -o cat -n 20
 ```
 
-O primeiro tem de aparecer na caixa de entrada do Gmail com a label
-`contato/teste`, com `Received:` e `Authentication-Results:` do
-`mx.lukakuuhaku.dev` no "Mostrar original".
+O primeiro chega no Gmail, provavelmente no **spam** (remetente inventado,
+sem DKIM), com a label `contato/teste` e o `Received:` do carteiro em
+"Mostrar original".
 
-## 4. Trocar o MX
+## Trocar o MX
 
-Registros de `lukakuuhaku.dev` (todos **DNS only**, sem o proxy laranja: MX
-não passa pelo proxy da Cloudflare):
+Registros **sem proxy** (MX não passa por proxy HTTP):
 
-| Ação | Tipo | Nome | Valor |
-|---|---|---|---|
-| criar | A | `mx` | `62.83.47.20` |
-| criar | AAAA | `mx` | `2a0a:4cc0:60:5522::1` |
-| desligar | Email Routing | | *Email → Email Routing → Settings → Disable*: tira os três MX `route{1,2,3}.mx.cloudflare.net` |
-| criar | MX | `@` | `mx.lukakuuhaku.dev`, prioridade 10, TTL 300 na troca |
-| trocar | TXT | `@` | de `v=spf1 include:_spf.mx.cloudflare.net ~all` para `v=spf1 include:_spf.google.com ~all` |
-| apagar | TXT | `cf2024-1._domainkey` | DKIM do Email Routing, depois que tudo estiver estável |
-| manter | TXT | `_dmarc` | `p=none` com relatório na Cloudflare: não depende do Email Routing |
+| Tipo | Nome | Valor |
+|---|---|---|
+| A | `mx` | IPv4 do servidor |
+| AAAA | `mx` | IPv6 do servidor |
+| MX | `@` | `mx.exemplo.com`, prioridade 10, TTL curto na troca |
+| TXT | `@` | o SPF só de quem **envia** pelo domínio (ex.: `v=spf1 include:_spf.google.com ~all`); o carteiro não envia nada |
 
-Hoje o `mx` já resolve pelo curinga `*.lukakuuhaku.dev`; o registro explícito
-deixa o MX independente dele. O SPF de hoje **não** inclui o Google: o que
-você envia pelo SMTP do Google já sai com SPF `softfail`, e o SPF novo corrige
-isso.
+Vindo do Cloudflare Email Routing: dá para criar o MX 10 antes de desligar o
+Email Routing (os MX dele têm prioridade maior, então ficam de reserva).
+Desligá-lo apaga os MX, o SPF e o DKIM que ele criou.
 
-Depois da troca, mande de outra conta (Outlook, outro Gmail) para `contato@`
-e `pix+algo@` e acompanhe `journalctl -u carteiro -f`. Volte o TTL do MX para
-o automático depois de um dia.
+Depois, mande de outra conta e acompanhe `journalctl -u carteiro -f`. De um
+Gmail, a linha mostra `spf=pass dkim_alinhado=pass dmarc=pass`.
 
-Opcional: o PTR do IPv4 é o padrão da netcup
-(`v2202610443087544551.luckysrv.de`). Para receber isso não importa; só pesa
-para quem envia.
-
-## 5. Voltar para a Cloudflare
-
-1. Apague o MX `mx.lukakuuhaku.dev`.
-2. *Email Routing → Enable*: a Cloudflare recria os três MX e oferece o SPF
-   dela (mantenha o `include:_spf.google.com` junto).
-3. Deixe o carteiro no ar até o TTL acabar: quem ainda resolve o MX antigo
-   continua entregando nele. Depois, `systemctl disable --now carteiro`.
-
-O que estiver em `/var/lib/carteiro/fila` ainda entra no Gmail enquanto o
-serviço estiver de pé.
+**Voltar:** apague o MX novo e religue o encaminhamento antigo. Deixe o
+carteiro no ar até o TTL acabar; o que estiver na fila ainda entra.
 
 ## Operação
 
-- **Log:** uma linha por evento no journald (`evento=recebida de=... para=...
-  tamanho=... resultado=importada|fila|recusada_gmail gmail_id=...
+- **Log:** uma linha por evento no journald (`evento=recebida de=...
+  para=... tamanho=... resultado=importada|fila|recusada_gmail gmail_id=...
   autenticacao="spf=... dmarc=..."`). Nada do corpo.
-- **Métricas:** `/var/lib/node-exporter/carteiro.prom` a cada 30 s, para o
-  textfile collector do node-exporter. Alertar em `carteiro_token_ok == 0`
-  (refresh token revogado: rode `carteiro autorizar` de novo),
+- **Métricas:** `metricas = "/var/lib/node-exporter/carteiro.prom"` grava a
+  cada 30 s para o textfile collector do node-exporter. Vale alertar em
+  `carteiro_token_ok == 0` (rode `carteiro autorizar` de novo),
   `carteiro_fila_idade_segundos > 3600` e `carteiro_falhou_mensagens > 0`.
-- **Fila:** `/var/lib/carteiro/fila/<id>.{eml,json}`. Tentativas depois de 1,
-  2, 5, 10 e 30 min e depois de hora em hora; após 5 dias a mensagem vai para
-  `falhou/` (o carteiro não manda bounce: isso seria enviar e-mail).
-- **`falhou/`:** o `.json` diz o erro. Para reenfileirar, mova o par de volta
-  para `fila/` com `tentativas` e `proxima` zerados e reinicie o serviço.
+- **Fila:** `/var/lib/carteiro/fila/<id>.{eml,json}`. Tentativas depois de
+  1, 2, 5, 10 e 30 min, depois de hora em hora; após 5 dias a mensagem vai
+  para `falhou/` (o carteiro não manda bounce: isso seria enviar e-mail).
+  Para reenfileirar, mova o par de volta para `fila/` com `tentativas` e
+  `proxima` zerados e reinicie.
 
-## Desenvolvimento
+## Contribuir
 
-```sh
-scripts/ci.sh      # fmt, clippy -D warnings, testes, cargo audit, systemd-analyze verify
-```
+[CONTRIBUTING.md](CONTRIBUTING.md): gates, testes e release. Falhas de
+segurança: [SECURITY.md](SECURITY.md).
 
-Os testes de ponta a ponta (`tests/ponta_a_ponta.rs`) sobem o carteiro de
-verdade contra um mock da Gmail API e do OAuth e conversam por SMTP, com
-STARTTLS.
+## Licença
+
+[GPL-3.0-or-later](LICENSE).
