@@ -1,0 +1,45 @@
+# .deb e .rpm do mesmo binário do tarball (scripts/empacotar.sh preenche as
+# variáveis e monta dist/preparo).
+name: carteiro
+arch: ${ARCH}
+platform: linux
+version: ${VERSAO}
+section: mail
+priority: optional
+maintainer: LLawli <contato+git@lukakuuhaku.dev>
+homepage: https://github.com/LLawli/carteiro
+license: GPL-3.0-or-later
+description: |
+  Recebe e-mail por SMTP e entrega na caixa do Gmail pela Gmail API.
+  Servidor de recebimento (MX) para um domínio próprio que põe as mensagens
+  na caixa do Gmail com users.messages.import, sem encaminhar por SMTP e sem
+  nunca enviar e-mail.
+contents:
+  - src: dist/preparo/carteiro
+    dst: /usr/bin/carteiro
+    file_info: { mode: 0755 }
+  - src: dist/preparo/copiar-certificado
+    dst: /usr/lib/carteiro/copiar-certificado
+    file_info: { mode: 0755 }
+  - src: dist/preparo/systemd/carteiro.service
+    dst: /usr/lib/systemd/system/carteiro.service
+  - src: dist/preparo/systemd/carteiro-certificado.service
+    dst: /usr/lib/systemd/system/carteiro-certificado.service
+  - src: dist/preparo/systemd/carteiro-certificado.path
+    dst: /usr/lib/systemd/system/carteiro-certificado.path
+  - src: dist/preparo/systemd/carteiro-certificado.timer
+    dst: /usr/lib/systemd/system/carteiro-certificado.timer
+  - src: config/carteiro.toml.example
+    dst: /etc/carteiro/carteiro.toml
+    type: config|noreplace
+    file_info: { mode: 0644 }
+  - src: README.md
+    dst: /usr/share/doc/carteiro/README.md
+  - src: CHANGELOG.md
+    dst: /usr/share/doc/carteiro/CHANGELOG.md
+  - src: LICENSE
+    dst: /usr/share/doc/carteiro/copyright
+scripts:
+  postinstall: pacote/postinstall.sh
+  preremove: pacote/preremove.sh
+  postremove: pacote/postremove.sh

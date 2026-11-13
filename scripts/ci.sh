@@ -7,6 +7,9 @@ cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo test
 cargo audit
+if command -v shellcheck >/dev/null; then
+  shellcheck -x scripts/*.sh bin/build bin/deploy deploy/copiar-certificado pacote/*.sh
+fi
 if command -v systemd-analyze >/dev/null; then
   # a unit precisa do binário e do usuário para o verify completo; aqui só
   # a sintaxe, com o ExecStart apontado para um binário que existe

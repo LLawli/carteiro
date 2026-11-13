@@ -1,0 +1,93 @@
+# Release por tag: `git tag v0.2.0 && git push origin v0.2.0` (ver
+# CONTRIBUTING.md). Compila uma vez por arquitetura, testa no alvo nativo,
+# empacota com scripts/empacotar.sh (tarball, .deb, .rpm e sha256) e publica
+# com a seção da versão no CHANGELOG.md como notas.
+name: release
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag já publicada (ex.: v0.1.0)"
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
+  NFPM_VERSAO: 2.48.0
+
+jobs:
+  pacotes:
+    strategy:
+      matrix:
+        include:
+          - { runner: ubuntu-22.04, alvo: x86_64-unknown-linux-gnu, nfpm: x86_64 }
+          - { runner: ubuntu-22.04-arm, alvo: aarch64-unknown-linux-gnu, nfpm: arm64 }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.alvo }}
+      - name: A tag bate com a versão do Cargo.toml
+        run: |
+          versao=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
+          if [ "v$versao" != "$TAG" ]; then
+            echo "tag $TAG, Cargo.toml $versao" >&2
+            exit 1
+          fi
+          echo "VERSAO=$versao" >>"$GITHUB_ENV"
+      - run: cargo test --locked
+      - run: cargo build --release --locked --target ${{ matrix.alvo }}
+      - name: nfpm (conferido pelo checksums.txt do release)
+        env:
+          ARQUIVO: nfpm_${{ env.NFPM_VERSAO }}_Linux_${{ matrix.nfpm }}.tar.gz
+        run: |
+          base="https://github.com/goreleaser/nfpm/releases/download/v$NFPM_VERSAO"
+          curl -fsSLO "$base/$ARQUIVO"
+          curl -fsSLO "$base/checksums.txt"
+          grep " $ARQUIVO\$" checksums.txt | sha256sum -c -
+          tar -xzf "$ARQUIVO" nfpm
+          sudo install -m 0755 nfpm /usr/local/bin/nfpm
+      - run: scripts/empacotar.sh "target/${{ matrix.alvo }}/release/carteiro" "$VERSAO" "${{ matrix.alvo }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pacotes-${{ matrix.alvo }}
+          path: |
+            dist/*.tar.gz
+            dist/*.deb
+            dist/*.rpm
+            dist/*.sha256
+          if-no-files-found: error
+
+  publicar:
+    needs: pacotes
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: pacotes-*
+          merge-multiple: true
+      - name: Confere os artefatos
+        run: |
+          ls -l dist
+          # 2 arquiteturas x (tarball, deb, rpm), cada um com o seu .sha256
+          test "$(find dist -name '*.sha256' | wc -l)" -eq 6
+          cd dist && cat ./*.sha256 | sha256sum -c -
+      - run: scripts/notas-release.sh "$TAG" dist >notas.md
+      - name: Publica
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$TAG" dist/* --title "carteiro $TAG" --notes-file notas.md --verify-tag
