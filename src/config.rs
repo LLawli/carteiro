@@ -87,6 +87,11 @@ pub struct Caixa {
     /// JSON com o `refresh_token` desta conta, gravado por `carteiro
     /// autorizar`.
     pub token: PathBuf,
+    /// Importa com `neverMarkSpam`: nada desta caixa vai para o spam do
+    /// Gmail (para um endereço de suporte, onde perder um cliente custa mais
+    /// que ver spam). As recusas do próprio carteiro continuam valendo.
+    #[serde(default)]
+    pub nunca_spam: bool,
 }
 
 /// Nome da caixa criada pela forma curta da config.
@@ -183,6 +188,7 @@ impl Config {
                     enderecos,
                     cliente_oauth,
                     token,
+                    nunca_spam: false,
                 });
             }
             _ => {
@@ -328,6 +334,7 @@ token = "/etc/carteiro/token-outra.json"
                 enderecos: vec!["contato".into(), "pix".into()],
                 cliente_oauth: "/etc/carteiro/cliente.json".into(),
                 token: "/etc/carteiro/token.json".into(),
+                nunca_spam: false,
             }]
         );
         assert_eq!(c.dominio, None);
@@ -340,12 +347,14 @@ token = "/etc/carteiro/token-outra.json"
     #[test]
     fn varias_caixas() {
         let c = normalizado(&duas(
-            "nome = \"outra\"\ndominio = \"Outro.test.\"\nenderecos = [\"suporte\"]",
+            "nome = \"outra\"\ndominio = \"Outro.test.\"\nenderecos = [\"suporte\"]\nnunca_spam = true",
         ))
         .unwrap();
         let nomes: Vec<_> = c.caixas.iter().map(|c| c.nome.as_str()).collect();
         assert_eq!(nomes, ["eu", "outra"]);
         assert_eq!(c.caixas[1].dominio, "outro.test");
+        assert!(!c.caixas[0].nunca_spam);
+        assert!(c.caixas[1].nunca_spam);
         assert!(c.e_nosso_dominio("outro.test"));
         assert!(!c.e_nosso_dominio("terceiro.test"));
         // o mesmo domínio em duas caixas, com endereços diferentes

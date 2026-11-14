@@ -57,3 +57,4 @@ metricas = "/var/lib/node-exporter/carteiro.prom"
 # enderecos = ["suporte"]
 # cliente_oauth = "cliente-web.json" # o refresh token só vale com o client que o gerou
 # token = "token-loja.json"
+# nunca_spam = true                # neverMarkSpam: nada desta caixa vai para o spam

@@ -125,6 +125,7 @@ pub struct Gmail {
     acesso: Mutex<Option<(String, Instant)>>,
     labels: Mutex<Labels>,
     labels_por_dia: u32,
+    nunca_spam: bool,
     token_ok: AtomicBool,
 }
 
@@ -201,8 +202,16 @@ impl Gmail {
                 criadas_hoje: 0,
             }),
             labels_por_dia,
+            nunca_spam: false,
             token_ok: AtomicBool::new(true),
         }
+    }
+
+    /// Importa com `neverMarkSpam=true`: o filtro de spam do Gmail não tira
+    /// a mensagem da caixa de entrada.
+    pub fn com_nunca_spam(mut self, nunca_spam: bool) -> Gmail {
+        self.nunca_spam = nunca_spam;
+        self
     }
 
     /// Falso depois de o Google recusar o refresh token (revogado, expirado):
@@ -405,8 +414,13 @@ impl Gmail {
 
     fn url_import(&self, tipo: &str) -> String {
         format!(
-            "{}/upload/gmail/v1/users/me/messages/import?uploadType={tipo}&internalDateSource=dateHeader",
-            self.api
+            "{}/upload/gmail/v1/users/me/messages/import?uploadType={tipo}&internalDateSource=dateHeader{}",
+            self.api,
+            if self.nunca_spam {
+                "&neverMarkSpam=true"
+            } else {
+                ""
+            }
         )
     }
 

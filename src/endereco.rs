@@ -148,6 +148,7 @@ mod testes {
             enderecos: enderecos.iter().map(|e| e.to_string()).collect(),
             cliente_oauth: "c.json".into(),
             token: "t.json".into(),
+            nunca_spam: false,
         }
     }
 

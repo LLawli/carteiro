@@ -10,6 +10,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
   endereços e a sua conta do Gmail (o seu `token`). Uma mensagem vai para uma
   conta só: um destinatário de outra caixa na mesma transação recebe
   `452 4.5.3` e quem envia o manda numa transação nova.
+- `nunca_spam = true` numa caixa: importa com `neverMarkSpam`, e o filtro de
+  spam do Gmail não tira nada dela da caixa de entrada.
 - `carteiro autorizar --escutar ENDEREÇO:PORTA --retorno https://URL`: o
   login no Google feito em outro aparelho, com o retorno passando por um
   proxy reverso (cliente OAuth "Web application").

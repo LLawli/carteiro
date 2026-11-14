@@ -84,14 +84,17 @@ pub async fn iniciar(config: Config) -> Result<Servidor, String> {
         let refresh = gmail::ler_refresh_token(&c.token).map_err(erro)?;
         contas.push((
             c.nome.clone(),
-            Arc::new(Gmail::new(
-                http.clone(),
-                &config.api_gmail,
-                &config.api_token,
-                cliente,
-                refresh,
-                config.labels_novas_por_dia,
-            )),
+            Arc::new(
+                Gmail::new(
+                    http.clone(),
+                    &config.api_gmail,
+                    &config.api_token,
+                    cliente,
+                    refresh,
+                    config.labels_novas_por_dia,
+                )
+                .com_nunca_spam(c.nunca_spam),
+            ),
         ));
     }
     let metricas = Arc::new(Metricas::default());

@@ -31,6 +31,7 @@ enum Modo {
 struct Import {
     /// refresh token da conta que importou
     conta: String,
+    nunca_spam: bool,
     tipo: String,
     labels: Vec<String>,
     bruto: Vec<u8>,
@@ -46,7 +47,7 @@ struct Estado {
     tokens: u32,
     /// refresh token (a conta) → access token válido
     token_valido: HashMap<String, String>,
-    sessoes: HashMap<String, (String, Vec<String>)>,
+    sessoes: HashMap<String, (String, bool, Vec<String>)>,
     endereco: Option<SocketAddr>,
     pedidos_import: u32,
 }
@@ -118,6 +119,7 @@ async fn criar_label(
 fn resposta_import(
     m: &Mock,
     conta: String,
+    nunca_spam: bool,
     tipo: &str,
     labels: Vec<String>,
     bruto: Vec<u8>,
@@ -147,6 +149,7 @@ fn resposta_import(
     let id = format!("gm{}", e.imports.len() + 1);
     e.imports.push(Import {
         conta,
+        nunca_spam,
         tipo: tipo.into(),
         labels,
         bruto,
@@ -201,7 +204,11 @@ async fn importar(
         q.get("internalDateSource").map(String::as_str),
         Some("dateHeader")
     );
-    assert!(!q.contains_key("neverMarkSpam"));
+    let nunca_spam = match q.get("neverMarkSpam").map(String::as_str) {
+        None => false,
+        Some("true") => true,
+        outro => panic!("neverMarkSpam={outro:?}"),
+    };
     let tipo_c = h
         .get(header::CONTENT_TYPE)
         .unwrap()
@@ -211,7 +218,7 @@ async fn importar(
     match q.get("uploadType").map(String::as_str) {
         Some("multipart") => {
             let (labels, bruto) = partes_multipart(&tipo_c, &corpo);
-            resposta_import(&m, conta, "multipart", labels, bruto)
+            resposta_import(&m, conta, nunca_spam, "multipart", labels, bruto)
         }
         Some("resumable") => {
             assert_eq!(h.get("X-Upload-Content-Type").unwrap(), "message/rfc822");
@@ -224,7 +231,7 @@ async fn importar(
                 .collect();
             let mut e = m.lock().unwrap();
             let id = format!("s{}", e.sessoes.len() + 1);
-            e.sessoes.insert(id.clone(), (conta, labels));
+            e.sessoes.insert(id.clone(), (conta, nunca_spam, labels));
             let local = e.endereco.unwrap();
             (
                 StatusCode::OK,
@@ -241,13 +248,13 @@ async fn sessao(
     Caminho(id): Caminho<String>,
     corpo: axum::body::Bytes,
 ) -> Response {
-    let (conta, labels) = m
+    let (conta, nunca_spam, labels) = m
         .lock()
         .unwrap()
         .sessoes
         .remove(&id)
         .expect("sessão resumable");
-    resposta_import(&m, conta, "resumable", labels, corpo.to_vec())
+    resposta_import(&m, conta, nunca_spam, "resumable", labels, corpo.to_vec())
 }
 
 async fn subir_mock() -> (Mock, SocketAddr) {
@@ -849,6 +856,10 @@ async fn mensagem_grande_vai_por_resumable() {
     assert_eq!(cod, 250, "{r}");
     let i = a.imports();
     assert_eq!(i[0].tipo, "resumable");
+    assert!(
+        !i[0].nunca_spam,
+        "sem nunca_spam na config, sem neverMarkSpam"
+    );
     assert!(i[0].bruto.starts_with(b"Return-Path:"));
     let esperado = String::from_utf8(corpo)
         .unwrap()
@@ -952,6 +963,7 @@ fn duas_caixas(c: &mut Config) {
             enderecos: c.enderecos.take().unwrap(),
             cliente_oauth: cliente.clone(),
             token,
+            nunca_spam: false,
         },
         Caixa {
             nome: "outra".into(),
@@ -959,6 +971,7 @@ fn duas_caixas(c: &mut Config) {
             enderecos: vec!["suporte".into()],
             cliente_oauth: cliente,
             token: outra,
+            nunca_spam: true,
         },
     ];
 }
@@ -987,6 +1000,11 @@ async fn cada_caixa_na_sua_conta() {
     assert_eq!(i.len(), 2);
     assert_eq!(i[0].conta, "rt-outra");
     assert_eq!(i[1].conta, "rt-teste");
+    assert!(i[0].nunca_spam, "a caixa outra importa com neverMarkSpam");
+    assert!(
+        !i[1].nunca_spam,
+        "a caixa eu deixa o filtro de spam decidir"
+    );
     let suporte = a.label_id("suporte/loja").unwrap();
     assert_eq!(i[0].labels, ["INBOX", "UNREAD", suporte.as_str()]);
     let bruto = String::from_utf8(i[0].bruto.clone()).unwrap();

@@ -79,7 +79,9 @@ para isso).
 
 - `users.messages.import` com `internalDateSource=dateHeader` e
   `labelIds = [INBOX, UNREAD, <label>]`: desde a mudança da API, o import sem
-  `INBOX` só aparece em "Todos os e-mails". Sem `neverMarkSpam`.
+  `INBOX` só aparece em "Todos os e-mails". Sem `neverMarkSpam`, a não ser
+  na caixa com `nunca_spam = true` (um endereço de suporte, onde perder um
+  cliente no spam custa mais que ver spam na caixa de entrada).
 - Até 5 MiB, `uploadType=multipart`; acima, `resumable`. O corpo sai do
   arquivo em pedaços de 64 KiB.
 - Escopos: `gmail.insert` e `gmail.labels`. O token de acesso é renovado

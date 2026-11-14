@@ -133,6 +133,8 @@ dominio = "loja.app"
 enderecos = ["suporte"]
 cliente_oauth = "cliente-web.json"
 token = "token-loja.json"
+# o filtro de spam do Gmail não mexe nesta caixa (neverMarkSpam)
+nunca_spam = true
 ```
 
 Cada arquivo novo entra na unit com mais um `LoadCredential=` (`systemctl
