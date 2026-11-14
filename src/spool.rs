@@ -17,6 +17,10 @@ use std::sync::atomic::{AtomicU32, Ordering};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Meta {
     pub id: String,
+    /// Nome da caixa (a conta do Gmail). Vazio no que foi gravado antes das
+    /// várias caixas: vai para a primeira.
+    #[serde(default)]
+    pub caixa: String,
     /// Cabeçalhos acrescentados no topo (Return-Path, Delivered-To,
     /// Authentication-Results, Received), já com CRLF.
     pub cabecalhos: String,
@@ -232,6 +236,7 @@ mod testes {
     fn meta(id: &str) -> Meta {
         Meta {
             id: id.into(),
+            caixa: "eu".into(),
             cabecalhos: "Received: x\r\n".into(),
             de: "a@b.c".into(),
             para: vec!["contato@x.y".into()],
@@ -266,6 +271,16 @@ mod testes {
         assert!(s.listar().unwrap().is_empty());
         assert_eq!(s.estatisticas().falhou, 1);
         fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn meta_sem_caixa_le_com_caixa_vazia() {
+        let mut m = meta("antigo");
+        m.caixa = String::new();
+        let mut v = serde_json::to_value(&m).unwrap();
+        v.as_object_mut().unwrap().remove("caixa");
+        let lida: Meta = serde_json::from_value(v).unwrap();
+        assert_eq!(lida, m);
     }
 
     #[test]

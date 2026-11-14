@@ -6,12 +6,13 @@ Gmail pela Gmail API (`users.messages.import`). Não encaminha por SMTP, então
 não quebra SPF/DMARC e não precisa de SRS. Também **nunca envia e-mail**, então
 a reputação do IP da VPS não importa. É um processo de ~6 MiB de RAM.
 
-Nasceu para substituir o Cloudflare Email Routing num domínio pessoal.
+Nasceu para substituir o Cloudflare Email Routing num domínio pessoal. Um
+carteiro atende vários domínios, cada caixa entregando na sua conta do Gmail.
 
 - `contato+banco@exemplo.com` chega na caixa de entrada com a label
   `contato/banco` (criada se não existir).
-- Só aceita o seu domínio e só os endereços da config: nunca é relay, e não
-  tem catch-all.
+- Só aceita os domínios e os endereços da config: nunca é relay, e não tem
+  catch-all.
 - O `250` só sai depois da mensagem gravada em disco. Se o Gmail responder em
   até 20 s, o `250` já traz o id do Gmail. Se o Gmail demorar ou estiver fora,
   a mensagem fica na fila e entra depois. Se o Gmail recusar a mensagem
@@ -81,6 +82,26 @@ sudo systemctl daemon-reload
 
    Abra a URL e autorize com a conta do Gmail de destino. O `token.json`
    (0600) tem o refresh token.
+
+   **Login em outro aparelho** (a conta é de outra pessoa): crie um client
+   **Web application** com `https://mx.exemplo.com/carteiro/oauth` em
+   *Authorized redirect URIs*, encaminhe esse caminho no proxy reverso para
+   o carteiro e mande a URL para a pessoa:
+
+   ```sh
+   carteiro autorizar client_secret_web.json token-outra.json \
+     --escutar 0.0.0.0:8765 --retorno https://mx.exemplo.com/carteiro/oauth
+   ```
+
+   ```caddy
+   mx.exemplo.com {
+     handle /carteiro/oauth { reverse_proxy 127.0.0.1:8765 }
+     respond 404
+   }
+   ```
+
+   O refresh token só vale com o client que o gerou: a caixa dessa conta usa
+   o JSON do client Web em `cliente_oauth`. Tire o `handle` depois.
 6. No servidor, os dois arquivos ficam em `/etc/carteiro`, `root` 0600. A unit
    os entrega ao serviço por `LoadCredential=`:
 
@@ -94,6 +115,31 @@ sudo systemctl daemon-reload
 `/etc/carteiro/carteiro.toml`: `hostname` (o nome do MX), `dominio` e
 `enderecos` (as partes locais aceitas). O resto tem padrão; ver
 [config/carteiro.toml.example](config/carteiro.toml.example).
+
+Para mais de uma conta do Gmail, troque `dominio`, `enderecos`,
+`cliente_oauth` e `token` por uma `[[caixas]]` para cada conta:
+
+```toml
+[[caixas]]
+nome = "eu"
+dominio = "exemplo.com"
+enderecos = ["contato", "pix"]
+cliente_oauth = "cliente.json"
+token = "token.json"
+
+[[caixas]]
+nome = "loja"
+dominio = "loja.app"
+enderecos = ["suporte"]
+cliente_oauth = "cliente-web.json"
+token = "token-loja.json"
+```
+
+Cada arquivo novo entra na unit com mais um `LoadCredential=` (`systemctl
+edit carteiro`). O MX de cada domínio aponta para o mesmo `hostname`. Uma
+mensagem para endereços de duas caixas vira duas entregas: o segundo
+destinatário recebe `452 4.5.3` e o servidor de quem enviou o manda numa
+transação nova, como a RFC 5321 manda.
 
 ### 3. Certificado
 
@@ -184,7 +230,7 @@ carteiro no ar até o TTL acabar; o que estiver na fila ainda entra.
   autenticacao="spf=... dmarc=..."`). Nada do corpo.
 - **Métricas:** `metricas = "/var/lib/node-exporter/carteiro.prom"` grava a
   cada 30 s para o textfile collector do node-exporter. Vale alertar em
-  `carteiro_token_ok == 0` (rode `carteiro autorizar` de novo),
+  `carteiro_token_ok{caixa="..."} == 0` (rode `carteiro autorizar` de novo),
   `carteiro_fila_idade_segundos > 3600` e `carteiro_falhou_mensagens > 0`.
 - **Fila:** `/var/lib/carteiro/fila/<id>.{eml,json}`. Tentativas depois de
   1, 2, 5, 10 e 30 min, depois de hora em hora; após 5 dias a mensagem vai

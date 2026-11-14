@@ -374,7 +374,7 @@ impl Sessao<'_> {
         let nome_l = nome.trim_end_matches('.').to_ascii_lowercase();
         let literal_local = format!("[{}]", self.local.ip().to_canonical());
         if nome_l == self.ctx.config.hostname
-            || nome_l == self.ctx.config.dominio
+            || self.ctx.config.e_nosso_dominio(&nome_l)
             || nome_l == literal_local
         {
             somar(&self.ctx.entrega.metricas.recusadas_protocolo);
@@ -502,11 +502,23 @@ impl Sessao<'_> {
         let Some(c) = endereco::caminho(arg, "TO:") else {
             return self.erro("501 5.1.3 Bad recipient address syntax").await;
         };
-        match endereco::destino(
-            &c.endereco,
-            &self.ctx.config.dominio,
-            &self.ctx.config.enderecos,
-        ) {
+        match endereco::destino(&c.endereco, &self.ctx.config.caixas) {
+            // Uma mensagem vai para uma conta só. O 452 (RFC 5321, 4.5.3.1.10)
+            // faz quem envia mandar os destinatários restantes numa nova
+            // transação, que cai na outra caixa.
+            Ok(d) if t.destinos.first().is_some_and(|p| p.caixa != d.caixa) => {
+                log::info(
+                    "rcpt_adiado",
+                    &[
+                        ("ip", &self.ip.to_string()),
+                        ("para", &c.endereco),
+                        ("motivo", "outra caixa na mesma transação"),
+                    ],
+                );
+                self.responder("452 4.5.3 Too many recipients, send the rest in a new transaction")
+                    .await?;
+                Ok(true)
+            }
             Ok(d) => {
                 let t = self.transacao.as_mut().expect("verificado acima");
                 if !t.destinos.contains(&d) {
@@ -728,8 +740,15 @@ impl Sessao<'_> {
             return format!("550 5.7.1 Message rejected: {motivo}");
         }
 
+        let caixa = t
+            .destinos
+            .first()
+            .and_then(|d| self.ctx.config.caixas.get(d.caixa))
+            .map(|c| c.nome.clone())
+            .unwrap_or_default();
         let meta = Meta {
             id: id.clone(),
+            caixa: caixa.clone(),
             cabecalhos: self.cabecalhos(&id, &t, &auth_cab, rdns.as_deref()),
             de: t.de.clone(),
             para,
@@ -785,6 +804,7 @@ impl Sessao<'_> {
                 ("tls", if self.tls.is_some() { "sim" } else { "nao" }),
                 ("de", &t.de),
                 ("para", &para_log),
+                ("caixa", &caixa),
                 ("tamanho", &tam),
                 ("resultado", resultado),
                 ("gmail_id", &gmail_id),

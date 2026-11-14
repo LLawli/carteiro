@@ -30,7 +30,8 @@ pub fn somar(c: &AtomicU64) {
 }
 
 impl Metricas {
-    pub fn texto(&self, spool: &Spool, token_ok: bool, agora: u64) -> String {
+    /// `tokens`: o nome de cada caixa e se o refresh token dela funciona.
+    pub fn texto(&self, spool: &Spool, tokens: &[(String, bool)], agora: u64) -> String {
         let l = |c: &AtomicU64| c.load(Ordering::Relaxed);
         let e = spool.estatisticas();
         let mut s = String::new();
@@ -100,12 +101,6 @@ impl Metricas {
             l(&self.ultimo_import_ok).to_string(),
         );
         m(
-            "token_ok",
-            "gauge",
-            "1 se o refresh token funciona.",
-            u8::from(token_ok).to_string(),
-        );
-        m(
             "fila_mensagens",
             "gauge",
             "Mensagens esperando import.",
@@ -125,6 +120,19 @@ impl Metricas {
             "Mensagens em falhou/ (olhar à mão).",
             e.falhou.to_string(),
         );
+        // uma série por caixa: o alerta usa min() para pegar qualquer uma
+        let _ = writeln!(
+            s,
+            "# HELP carteiro_token_ok 1 se o refresh token da caixa funciona."
+        );
+        let _ = writeln!(s, "# TYPE carteiro_token_ok gauge");
+        for (caixa, ok) in tokens {
+            let _ = writeln!(
+                s,
+                "carteiro_token_ok{{caixa=\"{caixa}\"}} {}",
+                u8::from(*ok)
+            );
+        }
         s
     }
 }
@@ -133,11 +141,15 @@ pub async fn gravar_sempre(
     caminho: PathBuf,
     metricas: Arc<Metricas>,
     spool: Arc<Spool>,
-    gmail: Arc<crate::gmail::Gmail>,
+    contas: crate::entrega::Contas,
 ) {
     let tmp = caminho.with_extension("prom.tmp");
     loop {
-        let texto = metricas.texto(&spool, gmail.token_ok(), crate::data::agora_unix());
+        let tokens: Vec<(String, bool)> = contas
+            .iter()
+            .map(|(n, g)| (n.clone(), g.token_ok()))
+            .collect();
+        let texto = metricas.texto(&spool, &tokens, crate::data::agora_unix());
         // 0644: o node-exporter roda como nobody e o UMask do serviço é 0077
         let r = async {
             tokio::fs::write(&tmp, texto).await?;

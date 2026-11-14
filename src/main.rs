@@ -9,6 +9,7 @@ uso:
   carteiro [servir] <config.toml>     recebe na porta 25 e importa no Gmail
   carteiro verificar <config.toml>    testa config, certificado, spool e token
   carteiro autorizar <cliente.json> <token.json> [--porta N]
+                    [--escutar ENDEREÇO:PORTA --retorno https://URL]
                                       autoriza a conta e grava o refresh token
   carteiro --versao";
 
@@ -33,11 +34,9 @@ fn main() -> ExitCode {
             Ok(())
         }
         ["verificar", c] => verificar(Path::new(c)),
-        ["autorizar", cliente, token] => autorizar(cliente, token, 0),
-        ["autorizar", cliente, token, "--porta", p] => match p.parse() {
-            Ok(p) => autorizar(cliente, token, p),
-            Err(_) => Err(format!("porta inválida: {p}")),
-        },
+        ["autorizar", cliente, token, opcoes @ ..] => {
+            autorizar::Opcoes::ler(opcoes).and_then(|o| autorizar(cliente, token, o))
+        }
         ["servir", c] => servir(Path::new(c)),
         [c] if !c.starts_with('-') => servir(Path::new(c)),
         _ => {
@@ -74,21 +73,24 @@ async fn esperar_sinal() {
     }
 }
 
-fn autorizar(cliente: &str, token: &str, porta: u16) -> Result<(), String> {
+fn autorizar(cliente: &str, token: &str, opcoes: autorizar::Opcoes) -> Result<(), String> {
     runtime().block_on(autorizar::executar(
         Path::new(cliente),
         &PathBuf::from(token),
-        porta,
+        opcoes,
     ))
 }
 
 fn verificar(caminho: &Path) -> Result<(), String> {
     let config = Config::carregar(caminho)?;
-    println!(
-        "config: ok ({} @ {})",
-        config.enderecos.join(", "),
-        config.dominio
-    );
+    for c in &config.caixas {
+        println!(
+            "caixa {}: ok ({} @ {})",
+            c.nome,
+            c.enderecos.join(", "),
+            c.dominio
+        );
+    }
     match (&config.certificado, &config.chave) {
         (Some(c), Some(k)) => {
             tls::carregar(c, k)?;
@@ -107,25 +109,30 @@ fn verificar(caminho: &Path) -> Result<(), String> {
             config.spool.display()
         );
     }
-    let cliente = gmail::ClienteOAuth::ler(&config.cliente_oauth)?;
-    let refresh = gmail::ler_refresh_token(&config.token)?;
-    let g = gmail::Gmail::new(
-        gmail::http(),
-        &config.api_gmail,
-        &config.api_token,
-        cliente,
-        refresh,
-        0,
-    );
-    // As labels base (`contato`, `pix`) saem da config: criá-las aqui adianta
-    // o que o primeiro e-mail faria e prova que o escopo gmail.labels veio.
-    let labels = config.enderecos.clone();
-    runtime()
-        .block_on(g.ids_labels(&labels))
-        .map_err(|e| format!("Gmail API: {e}"))?;
-    println!(
-        "gmail: ok (token renovado; labels {} prontas)",
-        labels.join(", ")
-    );
+    let http = gmail::http();
+    let rt = runtime();
+    for c in &config.caixas {
+        let erro = |e: String| format!("caixa {}: {e}", c.nome);
+        let cliente = gmail::ClienteOAuth::ler(&c.cliente_oauth).map_err(erro)?;
+        let refresh = gmail::ler_refresh_token(&c.token).map_err(erro)?;
+        let g = gmail::Gmail::new(
+            http.clone(),
+            &config.api_gmail,
+            &config.api_token,
+            cliente,
+            refresh,
+            0,
+        );
+        // As labels base (`contato`, `pix`) saem da config: criá-las aqui
+        // adianta o que o primeiro e-mail faria e prova que o escopo
+        // gmail.labels veio.
+        rt.block_on(g.ids_labels(&c.enderecos))
+            .map_err(|e| format!("caixa {}: Gmail API: {e}", c.nome))?;
+        println!(
+            "gmail {}: ok (token renovado; labels {} prontas)",
+            c.nome,
+            c.enderecos.join(", ")
+        );
+    }
     Ok(())
 }

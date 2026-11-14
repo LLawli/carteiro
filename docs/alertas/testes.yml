@@ -7,7 +7,9 @@ tests:
     input_series:
       - series: 'node_textfile_mtime_seconds{file="/rootfs/var/lib/node-exporter/carteiro.prom"}'
         values: '0+30x40'
-      - series: carteiro_token_ok
+      - series: 'carteiro_token_ok{caixa="principal"}'
+        values: '1x40'
+      - series: 'carteiro_token_ok{caixa="outra"}'
         values: '1x40'
       - series: carteiro_fila_idade_segundos
         values: '0x40'
@@ -19,7 +21,7 @@ tests:
       - { eval_time: 20m, alertname: CarteiroFilaParada, exp_alerts: [] }
       - { eval_time: 20m, alertname: CarteiroMensagemEmFalhou, exp_alerts: [] }
     promql_expr_test:
-      - expr: 1 - max(carteiro_token_ok) > 0
+      - expr: max by (caixa) (1 - carteiro_token_ok) > 0
         eval_time: 20m
         exp_samples: []
 
@@ -45,15 +47,18 @@ tests:
         alertname: CarteiroParado
         exp_alerts: [{ exp_labels: {} }]
 
+  # uma caixa com o token recusado e a outra boa: o max() antigo não via
   - interval: 30s
     input_series:
-      - series: carteiro_token_ok
+      - series: 'carteiro_token_ok{caixa="principal"}'
+        values: '1x30'
+      - series: 'carteiro_token_ok{caixa="outra"}'
         values: '1x10 0x20'
     alert_rule_test:
       - { eval_time: 7m, alertname: CarteiroTokenRecusado, exp_alerts: [] }
       - eval_time: 11m
         alertname: CarteiroTokenRecusado
-        exp_alerts: [{ exp_labels: {} }]
+        exp_alerts: [{ exp_labels: { caixa: outra } }]
 
   # fila: idade passa de 1 h aos 61 min (cresce 30 s por amostra)
   - interval: 30s

@@ -41,9 +41,12 @@ pub enum Resultado {
     Recusada(String),
 }
 
+/// O nome de uma caixa e o cliente da conta dela.
+pub type Contas = Vec<(String, Arc<Gmail>)>;
+
 pub struct Entrega {
     pub spool: Arc<Spool>,
-    pub gmail: Arc<Gmail>,
+    pub contas: Contas,
     pub metricas: Arc<Metricas>,
     desistir_apos: Duration,
     espera_base: u64,
@@ -61,20 +64,29 @@ struct Espera {
 impl Entrega {
     pub fn new(
         spool: Arc<Spool>,
-        gmail: Arc<Gmail>,
+        contas: Contas,
         metricas: Arc<Metricas>,
         desistir_apos: Duration,
         espera_base: u64,
     ) -> Entrega {
         Entrega {
             spool,
-            gmail,
+            contas,
             metricas,
             desistir_apos,
             espera_base,
             em_voo: Mutex::new(HashSet::new()),
             aviso: Notify::new(),
         }
+    }
+
+    /// A conta de uma caixa. Caixa vazia (spool de antes das várias caixas)
+    /// é a primeira.
+    pub fn conta(&self, caixa: &str) -> Option<&Arc<Gmail>> {
+        if caixa.is_empty() {
+            return self.contas.first().map(|(_, g)| g);
+        }
+        self.contas.iter().find(|(n, _)| n == caixa).map(|(_, g)| g)
     }
 
     fn em_voo(&self) -> std::sync::MutexGuard<'_, HashSet<String>> {
@@ -127,7 +139,15 @@ impl Entrega {
     /// esteja esperando); sem, é do trabalhador e o `250` já foi dado.
     async fn tentar(self: Arc<Self>, mut meta: Meta, aguardando: Option<Arc<Mutex<Espera>>>) {
         let eml = self.spool.eml(&meta.id);
-        let r = self.gmail.importar(&meta, &eml).await;
+        let r = match self.conta(&meta.caixa) {
+            Some(g) => g.importar(&meta, &eml).await,
+            // renomeada ou tirada da config: espera até o prazo, alguém pode
+            // devolver a caixa
+            None => Err(Falha::Temporaria(format!(
+                "caixa {:?} não está na config",
+                meta.caixa
+            ))),
+        };
 
         let mut guarda = aguardando
             .as_ref()
@@ -149,6 +169,7 @@ impl Entrega {
                     "importada",
                     &[
                         ("id", &meta.id),
+                        ("caixa", &meta.caixa),
                         ("gmail_id", &id_gmail),
                         ("tentativas", &(meta.tentativas + 1).to_string()),
                     ],
@@ -219,6 +240,7 @@ impl Entrega {
             "desistencia",
             &[
                 ("id", &meta.id),
+                ("caixa", &meta.caixa),
                 ("motivo", motivo),
                 ("de", &meta.de),
                 ("para", &meta.para.join(",")),

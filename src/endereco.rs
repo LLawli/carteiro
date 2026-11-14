@@ -1,6 +1,8 @@
 //! Caminhos do `MAIL FROM`/`RCPT TO`, validação do destinatário e a label do
 //! subendereço.
 
+use crate::config::Caixa;
+
 /// Caminho e parâmetros ESMTP de `FROM:<a@b> SIZE=10 BODY=8BITMIME`.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Caminho {
@@ -48,10 +50,11 @@ pub fn caminho(arg: &str, prefixo: &str) -> Option<Caminho> {
     })
 }
 
-/// Um destinatário aceito: `base` está em `enderecos` e `sub` é o que vem
-/// depois do `+`, se houver.
+/// Um destinatário aceito: `base` está nos `enderecos` da caixa de índice
+/// `caixa` e `sub` é o que vem depois do `+`, se houver.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Destino {
+    pub caixa: usize,
     pub endereco: String,
     pub base: String,
     pub sub: Option<String>,
@@ -59,15 +62,16 @@ pub struct Destino {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Recusa {
-    /// Outro domínio: aceitar seria open relay.
+    /// Domínio de nenhuma caixa: aceitar seria open relay.
     ForaDoDominio,
     /// Domínio certo, caixa que não existe.
     Desconhecido,
 }
 
-pub fn destino(endereco: &str, dominio: &str, enderecos: &[String]) -> Result<Destino, Recusa> {
+pub fn destino(endereco: &str, caixas: &[Caixa]) -> Result<Destino, Recusa> {
     let (local, dom) = endereco.rsplit_once('@').ok_or(Recusa::ForaDoDominio)?;
-    if !dom.trim_end_matches('.').eq_ignore_ascii_case(dominio) {
+    let dom = dom.trim_end_matches('.').to_ascii_lowercase();
+    if !caixas.iter().any(|c| c.dominio == dom) {
         return Err(Recusa::ForaDoDominio);
     }
     if local.starts_with('"') {
@@ -78,11 +82,13 @@ pub fn destino(endereco: &str, dominio: &str, enderecos: &[String]) -> Result<De
         Some((b, s)) => (b.to_string(), Some(s.to_string())),
         None => (local.clone(), None),
     };
-    if !enderecos.contains(&base) {
-        return Err(Recusa::Desconhecido);
-    }
+    let caixa = caixas
+        .iter()
+        .position(|c| c.dominio == dom && c.enderecos.contains(&base))
+        .ok_or(Recusa::Desconhecido)?;
     Ok(Destino {
-        endereco: format!("{local}@{dominio}"),
+        caixa,
+        endereco: format!("{local}@{dom}"),
         base,
         sub: sub.filter(|s| !s.is_empty()),
     })
@@ -135,8 +141,18 @@ pub fn helo_valido(arg: &str) -> bool {
 mod testes {
     use super::*;
 
-    fn end() -> Vec<String> {
-        vec!["contato".into(), "pix".into()]
+    fn caixa(nome: &str, dominio: &str, enderecos: &[&str]) -> Caixa {
+        Caixa {
+            nome: nome.into(),
+            dominio: dominio.into(),
+            enderecos: enderecos.iter().map(|e| e.to_string()).collect(),
+            cliente_oauth: "c.json".into(),
+            token: "t.json".into(),
+        }
+    }
+
+    fn end() -> Vec<Caixa> {
+        vec![caixa("eu", "exemplo.com", &["contato", "pix"])]
     }
 
     #[test]
@@ -168,52 +184,62 @@ mod testes {
 
     #[test]
     fn destino_aceita_so_o_dominio_e_os_enderecos() {
-        let d = destino("Contato+Banco@Exemplo.COM", "exemplo.com", &end()).unwrap();
+        let d = destino("Contato+Banco@Exemplo.COM", &end()).unwrap();
         assert_eq!(d.base, "contato");
         assert_eq!(d.sub.as_deref(), Some("banco"));
         assert_eq!(d.endereco, "contato+banco@exemplo.com");
         assert_eq!(d.label(), "contato/banco");
+        assert_eq!(destino("pix@exemplo.com.", &end()).unwrap().label(), "pix");
+        assert_eq!(destino("pix+@exemplo.com", &end()).unwrap().sub, None);
         assert_eq!(
-            destino("pix@exemplo.com.", "exemplo.com", &end())
-                .unwrap()
-                .label(),
-            "pix"
-        );
-        assert_eq!(
-            destino("pix+@exemplo.com", "exemplo.com", &end())
-                .unwrap()
-                .sub,
-            None
-        );
-        assert_eq!(
-            destino("contato@gmail.com", "exemplo.com", &end()),
+            destino("contato@gmail.com", &end()),
             Err(Recusa::ForaDoDominio)
         );
         assert_eq!(
-            destino("contato@sub.exemplo.com", "exemplo.com", &end()),
+            destino("contato@sub.exemplo.com", &end()),
             Err(Recusa::ForaDoDominio)
         );
         assert_eq!(
-            destino("admin@exemplo.com", "exemplo.com", &end()),
+            destino("admin@exemplo.com", &end()),
             Err(Recusa::Desconhecido)
         );
         assert_eq!(
-            destino("\"contato\"@exemplo.com", "exemplo.com", &end()),
+            destino("\"contato\"@exemplo.com", &end()),
             Err(Recusa::Desconhecido)
         );
+        assert_eq!(destino("semarroba", &end()), Err(Recusa::ForaDoDominio));
+    }
+
+    #[test]
+    fn cada_endereco_na_sua_caixa() {
+        let caixas = vec![
+            caixa("eu", "exemplo.com", &["contato", "pix"]),
+            caixa("outra", "outro.app", &["suporte"]),
+            caixa("terceira", "exemplo.com", &["vendas"]),
+        ];
+        let c = |e: &str| destino(e, &caixas).map(|d| d.caixa);
+        assert_eq!(c("contato@exemplo.com"), Ok(0));
+        assert_eq!(c("Suporte+Loja@Outro.App"), Ok(1));
+        assert_eq!(c("vendas@exemplo.com"), Ok(2));
+        assert_eq!(c("contato@outro.app"), Err(Recusa::Desconhecido));
+        assert_eq!(c("suporte@exemplo.com"), Err(Recusa::Desconhecido));
+        assert_eq!(c("suporte@terceiro.app"), Err(Recusa::ForaDoDominio));
         assert_eq!(
-            destino("semarroba", "exemplo.com", &end()),
-            Err(Recusa::ForaDoDominio)
+            destino("suporte@outro.app.", &caixas).unwrap().endereco,
+            "suporte@outro.app"
         );
     }
 
     #[test]
     fn sufixo_estranho_fica_com_a_label_base() {
-        let d = |e: &str| destino(e, "x.y", &end()).unwrap().label();
-        assert_eq!(d("contato+a.b_c-1@x.y"), "contato/a.b_c-1");
-        assert_eq!(d("contato+a/b@x.y"), "contato");
-        assert_eq!(d("contato+çã@x.y"), "contato");
-        assert_eq!(d(&format!("contato+{}@x.y", "a".repeat(33))), "contato");
+        let d = |e: &str| destino(e, &end()).unwrap().label();
+        assert_eq!(d("contato+a.b_c-1@exemplo.com"), "contato/a.b_c-1");
+        assert_eq!(d("contato+a/b@exemplo.com"), "contato");
+        assert_eq!(d("contato+çã@exemplo.com"), "contato");
+        assert_eq!(
+            d(&format!("contato+{}@exemplo.com", "a".repeat(33))),
+            "contato"
+        );
     }
 
     #[test]

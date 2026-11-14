@@ -37,3 +37,23 @@ token = "token.json"
 
 # Textfile collector do node-exporter.
 metricas = "/var/lib/node-exporter/carteiro.prom"
+
+# Várias contas do Gmail: tire dominio, enderecos, cliente_oauth e token lá
+# de cima e ponha uma [[caixas]] para cada conta, no fim do arquivo (em TOML
+# as tabelas vêm depois das chaves soltas). O MX de cada domínio aponta para
+# o mesmo hostname; cada arquivo de credencial novo entra na unit com mais um
+# LoadCredential= (systemctl edit carteiro).
+#
+# [[caixas]]
+# nome = "eu"                      # nos logs, nas métricas e no spool
+# dominio = "exemplo.com"
+# enderecos = ["contato", "pix"]
+# cliente_oauth = "cliente.json"
+# token = "token.json"
+#
+# [[caixas]]
+# nome = "loja"
+# dominio = "loja.app"
+# enderecos = ["suporte"]
+# cliente_oauth = "cliente-web.json" # o refresh token só vale com o client que o gerou
+# token = "token-loja.json"

@@ -13,8 +13,9 @@ groups:
           (time() - max(node_textfile_mtime_seconds{file=~".*/carteiro\\.prom"})) > 180
           or absent(node_textfile_mtime_seconds{file=~".*/carteiro\\.prom"})
         for: 2m
+      # uma série por caixa: um alerta por caixa com o token recusado
       - alert: CarteiroTokenRecusado
-        expr: 1 - max(carteiro_token_ok) > 0
+        expr: max by (caixa) (1 - carteiro_token_ok) > 0
         for: 5m
       - alert: CarteiroFilaParada
         expr: max(carteiro_fila_idade_segundos) > 3600

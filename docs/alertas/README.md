@@ -25,15 +25,17 @@ node-exporter ou o `textfile.directory` dele.
 
 ## Token do Gmail recusado
 
-O Google recusou o refresh token (`invalid_grant`): senha da conta trocada,
-acesso do app revogado, ou o app voltou para *Testing* (token de 7 dias).
-O carteiro continua aceitando e guardando na fila, sem importar.
+O Google recusou o refresh token de uma caixa (`invalid_grant`, o label
+`caixa` diz qual): senha da conta trocada, acesso do app revogado, ou o app
+voltou para *Testing* (token de 7 dias). O carteiro continua aceitando e
+guardando na fila, sem importar; as outras caixas seguem normais.
 
 1. Confira em *Google Auth Platform → Audience* que o app está **In
    production**.
-2. Numa máquina com navegador: `carteiro autorizar client_secret.json token.json`.
-3. Troque o `/etc/carteiro/token.json` (root 0600) e reinicie o carteiro. A
-   fila entra sozinha nas tentativas seguintes.
+2. Autorize de novo com a conta daquela caixa e o cliente OAuth dela (ver o
+   README, *Credenciais do Google*).
+3. Troque o arquivo `token` da caixa em `/etc/carteiro` (root 0600) e
+   reinicie o carteiro. A fila entra sozinha nas tentativas seguintes.
 
 ## Fila parada
 

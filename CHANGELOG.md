@@ -4,6 +4,24 @@ Formato [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Unreleased]
 
+### Adicionado
+
+- Várias caixas: `[[caixas]]` na config, cada uma com o seu domínio, os seus
+  endereços e a sua conta do Gmail (o seu `token`). Uma mensagem vai para uma
+  conta só: um destinatário de outra caixa na mesma transação recebe
+  `452 4.5.3` e quem envia o manda numa transação nova.
+- `carteiro autorizar --escutar ENDEREÇO:PORTA --retorno https://URL`: o
+  login no Google feito em outro aparelho, com o retorno passando por um
+  proxy reverso (cliente OAuth "Web application").
+
+### Mudado
+
+- `carteiro_token_ok` ganhou o label `caixa` (uma série por caixa). Um
+  alerta com `max(carteiro_token_ok)` deixa de ver uma caixa quebrada ao lado
+  de uma boa: use `max by (caixa) (1 - carteiro_token_ok) > 0`.
+- A config de uma caixa só (`dominio`, `enderecos`, `cliente_oauth` e `token`
+  no topo) continua valendo e vira a caixa `principal`.
+
 ## [0.1.0] - 2026-11-13
 
 ### Adicionado

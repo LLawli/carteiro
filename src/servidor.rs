@@ -3,7 +3,7 @@
 
 use crate::autenticacao::Verificador;
 use crate::config::Config;
-use crate::entrega::Entrega;
+use crate::entrega::{Contas, Entrega};
 use crate::gmail::{self, ClienteOAuth, Gmail};
 use crate::log;
 use crate::metricas::{self, Metricas, somar};
@@ -76,20 +76,28 @@ pub async fn iniciar(config: Config) -> Result<Servidor, String> {
         Spool::abrir(&config.spool)
             .map_err(|e| format!("spool {}: {e}", config.spool.display()))?,
     );
-    let cliente = ClienteOAuth::ler(&config.cliente_oauth)?;
-    let refresh = gmail::ler_refresh_token(&config.token)?;
-    let gmail = Arc::new(Gmail::new(
-        gmail::http(),
-        &config.api_gmail,
-        &config.api_token,
-        cliente,
-        refresh,
-        config.labels_novas_por_dia,
-    ));
+    let http = gmail::http();
+    let mut contas: Contas = Vec::new();
+    for c in &config.caixas {
+        let erro = |e: String| format!("caixa {}: {e}", c.nome);
+        let cliente = ClienteOAuth::ler(&c.cliente_oauth).map_err(erro)?;
+        let refresh = gmail::ler_refresh_token(&c.token).map_err(erro)?;
+        contas.push((
+            c.nome.clone(),
+            Arc::new(Gmail::new(
+                http.clone(),
+                &config.api_gmail,
+                &config.api_token,
+                cliente,
+                refresh,
+                config.labels_novas_por_dia,
+            )),
+        ));
+    }
     let metricas = Arc::new(Metricas::default());
     let entrega = Arc::new(Entrega::new(
         Arc::clone(&spool),
-        Arc::clone(&gmail),
+        contas.clone(),
         Arc::clone(&metricas),
         config.desistir_apos(),
         config.espera_retentativa_s,
@@ -146,7 +154,7 @@ pub async fn iniciar(config: Config) -> Result<Servidor, String> {
             caminho,
             Arc::clone(&metricas),
             Arc::clone(&spool),
-            Arc::clone(&gmail),
+            contas,
         ));
     }
     for ouvinte in ouvintes {
@@ -221,6 +229,16 @@ pub async fn iniciar(config: Config) -> Result<Servidor, String> {
                     .join(","),
             ),
             ("fila", &spool.estatisticas().fila.to_string()),
+            (
+                "caixas",
+                &contexto
+                    .config
+                    .caixas
+                    .iter()
+                    .map(|c| c.nome.as_str())
+                    .collect::<Vec<_>>()
+                    .join(","),
+            ),
         ],
     );
     Ok(Servidor {

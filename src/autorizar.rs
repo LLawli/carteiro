@@ -1,16 +1,22 @@
-//! `carteiro autorizar`: fluxo OAuth de app instalado com redirecionamento
-//! para o loopback e PKCE. Abre a URL no navegador, recebe o código em
-//! `http://127.0.0.1:<porta>` e grava o refresh token (0600).
+//! `carteiro autorizar`: fluxo OAuth com código de autorização e PKCE. Mostra
+//! a URL, recebe o código no retorno e grava o refresh token (0600).
+//!
+//! - Padrão (cliente OAuth "Desktop"): o retorno é o loopback,
+//!   `http://127.0.0.1:<porta>`, então o navegador tem de estar na mesma
+//!   máquina (ou usar `ssh -L <porta>:127.0.0.1:<porta>` com `--porta`).
+//! - Login feito em outro aparelho (cliente OAuth "Web application"):
+//!   `--retorno https://host/caminho` é a URL pública que um proxy reverso
+//!   encaminha para `--escutar`. A URL tem de estar nas "Authorized redirect
+//!   URIs" do cliente.
 //!
 //! O device flow não serve: o Google não libera os escopos do Gmail nele.
-//! Numa máquina sem navegador, rode aqui e copie o arquivo, ou use
-//! `ssh -L <porta>:127.0.0.1:<porta>` com `--porta`.
 
 use crate::gmail::{ClienteOAuth, ESCOPOS, aleatorio_hex};
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use serde::Deserialize;
 use std::io::Write;
+use std::net::SocketAddr;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -77,13 +83,61 @@ struct RespostaCodigo {
     scope: Option<String>,
 }
 
-pub async fn executar(cliente: &Path, saida: &Path, porta: u16) -> Result<(), String> {
+/// Onde esperar o retorno e para onde o Google manda o navegador.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Opcoes {
+    pub escutar: SocketAddr,
+    /// `None`: o loopback, `http://127.0.0.1:<porta>`.
+    pub retorno: Option<String>,
+}
+
+impl Opcoes {
+    /// Lê `[--porta N] [--escutar ENDEREÇO:PORTA] [--retorno URL]`.
+    pub fn ler(args: &[&str]) -> Result<Opcoes, String> {
+        let mut o = Opcoes {
+            escutar: SocketAddr::from(([127, 0, 0, 1], 0)),
+            retorno: None,
+        };
+        let mut i = args.iter();
+        while let Some(a) = i.next() {
+            let valor = i.next().ok_or_else(|| format!("{a} sem valor"))?;
+            match *a {
+                "--porta" => {
+                    let p: u16 = valor
+                        .parse()
+                        .map_err(|_| format!("porta inválida: {valor}"))?;
+                    o.escutar.set_port(p);
+                }
+                "--escutar" => {
+                    o.escutar = valor
+                        .parse()
+                        .map_err(|_| format!("endereço inválido: {valor} (ex.: 0.0.0.0:8765)"))?;
+                }
+                "--retorno" => {
+                    if !valor.starts_with("https://") {
+                        return Err(format!("--retorno precisa ser https: {valor}"));
+                    }
+                    o.retorno = Some(valor.to_string());
+                }
+                _ => return Err(format!("opção desconhecida: {a}")),
+            }
+        }
+        if o.retorno.is_some() && o.escutar.port() == 0 {
+            return Err("--retorno precisa de uma porta fixa em --escutar ou --porta".into());
+        }
+        Ok(o)
+    }
+}
+
+pub async fn executar(cliente: &Path, saida: &Path, opcoes: Opcoes) -> Result<(), String> {
     let c = ClienteOAuth::ler(cliente)?;
-    let ouvinte = TcpListener::bind(("127.0.0.1", porta))
+    let ouvinte = TcpListener::bind(opcoes.escutar)
         .await
-        .map_err(|e| format!("127.0.0.1:{porta}: {e}"))?;
+        .map_err(|e| format!("{}: {e}", opcoes.escutar))?;
     let porta = ouvinte.local_addr().map_err(|e| e.to_string())?.port();
-    let redirecionar = format!("http://127.0.0.1:{porta}");
+    let redirecionar = opcoes
+        .retorno
+        .unwrap_or_else(|| format!("http://127.0.0.1:{porta}"));
     let verificador = URL_SAFE_NO_PAD.encode(aleatorio_hex(32));
     let estado = aleatorio_hex(16);
     let url = format!(
@@ -96,7 +150,10 @@ pub async fn executar(cliente: &Path, saida: &Path, porta: u16) -> Result<(), St
         estado
     );
     eprintln!("Abra no navegador e autorize com a conta do Gmail de destino:\n\n{url}\n");
-    eprintln!("Esperando o retorno em {redirecionar} ...");
+    eprintln!(
+        "Esperando o retorno em {redirecionar} (escutando em {}:{porta}) ...",
+        opcoes.escutar.ip()
+    );
 
     let codigo = loop {
         let (mut s, _) = ouvinte.accept().await.map_err(|e| e.to_string())?;
@@ -188,6 +245,47 @@ mod testes {
         assert_eq!(p[0], ("state".into(), "abc".into()));
         assert_eq!(p[1], ("code".into(), "4/0A".into()));
         assert!(parametros("GET / HTTP/1.1").is_empty());
+    }
+
+    #[test]
+    fn opcoes_do_retorno() {
+        assert_eq!(
+            Opcoes::ler(&[]).unwrap(),
+            Opcoes {
+                escutar: "127.0.0.1:0".parse().unwrap(),
+                retorno: None
+            }
+        );
+        assert_eq!(
+            Opcoes::ler(&["--porta", "8765"]).unwrap().escutar,
+            "127.0.0.1:8765".parse().unwrap()
+        );
+        let o = Opcoes::ler(&[
+            "--escutar",
+            "0.0.0.0:8765",
+            "--retorno",
+            "https://mx.exemplo.com/carteiro/oauth",
+        ])
+        .unwrap();
+        assert_eq!(o.escutar, "0.0.0.0:8765".parse().unwrap());
+        assert_eq!(
+            o.retorno.as_deref(),
+            Some("https://mx.exemplo.com/carteiro/oauth")
+        );
+        assert!(
+            Opcoes::ler(&["--retorno", "https://x.y/z"]).is_err(),
+            "sem porta fixa"
+        );
+        assert!(Opcoes::ler(&["--retorno", "http://x.y/z", "--porta", "1"]).is_err());
+        assert!(Opcoes::ler(&["--porta"]).is_err());
+        assert!(Opcoes::ler(&["--porta", "x"]).is_err());
+        assert!(Opcoes::ler(&["--outra", "1"]).is_err());
+    }
+
+    #[test]
+    fn retorno_por_proxy_com_caminho() {
+        let p = parametros("GET /carteiro/oauth?state=abc&code=4%2F0A HTTP/1.1");
+        assert_eq!(p[1], ("code".into(), "4/0A".into()));
     }
 
     #[test]

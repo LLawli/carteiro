@@ -25,8 +25,12 @@ PIPELINING, 8BITMIME) ficou em `src/smtp.rs`.
    antes do banner (1 s) leva `554` e cai.
 2. **EHLO/HELO:** precisa ser FQDN ou literal de IP; HELO com o nosso nome,
    domínio ou IP leva `550`.
-3. **RCPT:** só o `dominio` da config e só as bases de `enderecos`;
-   o resto do domínio leva `550 5.1.1`, outro domínio `550 5.7.1`.
+3. **RCPT:** só os domínios das caixas e só as bases de `enderecos` de cada
+   uma; o resto do domínio leva `550 5.1.1`, outro domínio `550 5.7.1`. Uma
+   transação vai para uma caixa só: o destinatário de outra caixa leva
+   `452 4.5.3` e volta numa transação nova. Assim cada mensagem tem uma
+   conta, um `250` e um destino no spool, sem resposta parcial no DATA (que
+   só o LMTP teria).
 4. **DATA:** o corpo vai direto para `spool/tmp/<id>.eml`, sem passar inteiro
    pela memória. Só `CRLF.CRLF` encerra (um LF solto não começa linha), o que
    fecha o "SMTP smuggling". Passou do `SIZE`: lê até o fim, descarta, `552`.
@@ -79,8 +83,8 @@ para isso).
 - Até 5 MiB, `uploadType=multipart`; acima, `resumable`. O corpo sai do
   arquivo em pedaços de 64 KiB.
 - Escopos: `gmail.insert` e `gmail.labels`. O token de acesso é renovado
-  sozinho; `invalid_grant` derruba `carteiro_token_ok` para 0 e as mensagens
-  ficam na fila até um `carteiro autorizar` novo.
+  sozinho; `invalid_grant` derruba `carteiro_token_ok{caixa}` para 0 e as
+  mensagens daquela caixa ficam na fila até um `carteiro autorizar` novo.
 - Labels: `contato+x@` vira `contato/x` (o pai é criado antes). Só
   `[a-z0-9._-]`, até 32 caracteres; fora disso fica a label da base. No
   máximo 20 labels de subendereço novas por dia, contra quem quisesse encher

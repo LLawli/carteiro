@@ -6,7 +6,7 @@ use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
 use axum::{Form, Json, Router};
-use carteiro::config::Config;
+use carteiro::config::{Caixa, Config};
 use carteiro::servidor::{self, Servidor};
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -29,6 +29,8 @@ enum Modo {
 
 #[derive(Debug, Clone)]
 struct Import {
+    /// refresh token da conta que importou
+    conta: String,
     tipo: String,
     labels: Vec<String>,
     bruto: Vec<u8>,
@@ -42,28 +44,32 @@ struct Estado {
     imports: Vec<Import>,
     labels: Vec<(String, String)>,
     tokens: u32,
-    token_valido: Option<String>,
-    sessoes: HashMap<String, Vec<String>>,
+    /// refresh token (a conta) → access token válido
+    token_valido: HashMap<String, String>,
+    sessoes: HashMap<String, (String, Vec<String>)>,
     endereco: Option<SocketAddr>,
     pedidos_import: u32,
 }
 
 type Mock = Arc<Mutex<Estado>>;
 
-fn autorizado(m: &Mock, h: &HeaderMap) -> bool {
+/// A conta dona do access token, se ele vale.
+fn autorizado(m: &Mock, h: &HeaderMap) -> Option<String> {
     let e = m.lock().unwrap();
     let dado = h
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
     e.token_valido
-        .as_ref()
-        .is_some_and(|t| dado == format!("Bearer {t}"))
+        .iter()
+        .find(|(_, t)| dado == format!("Bearer {t}"))
+        .map(|(conta, _)| conta.clone())
 }
 
 async fn token(State(m): State<Mock>, Form(f): Form<HashMap<String, String>>) -> Response {
+    let conta = f.get("refresh_token").cloned().unwrap_or_default();
     if f.get("grant_type").map(String::as_str) != Some("refresh_token")
-        || f.get("refresh_token").map(String::as_str) != Some("rt-teste")
+        || !["rt-teste", "rt-outra"].contains(&conta.as_str())
         || f.get("client_secret").map(String::as_str) != Some("segredo")
     {
         return (StatusCode::BAD_REQUEST, r#"{"error":"invalid_grant"}"#).into_response();
@@ -71,13 +77,13 @@ async fn token(State(m): State<Mock>, Form(f): Form<HashMap<String, String>>) ->
     let mut e = m.lock().unwrap();
     e.tokens += 1;
     let t = format!("at-{}", e.tokens);
-    e.token_valido = Some(t.clone());
+    e.token_valido.insert(conta, t.clone());
     Json(serde_json::json!({"access_token": t, "expires_in": 3600, "token_type": "Bearer"}))
         .into_response()
 }
 
 async fn listar_labels(State(m): State<Mock>, h: HeaderMap) -> Response {
-    if !autorizado(&m, &h) {
+    if autorizado(&m, &h).is_none() {
         return StatusCode::UNAUTHORIZED.into_response();
     }
     let e = m.lock().unwrap();
@@ -96,7 +102,7 @@ async fn criar_label(
     h: HeaderMap,
     Json(c): Json<serde_json::Value>,
 ) -> Response {
-    if !autorizado(&m, &h) {
+    if autorizado(&m, &h).is_none() {
         return StatusCode::UNAUTHORIZED.into_response();
     }
     let mut e = m.lock().unwrap();
@@ -109,7 +115,13 @@ async fn criar_label(
     Json(serde_json::json!({"id": id, "name": nome})).into_response()
 }
 
-fn resposta_import(m: &Mock, tipo: &str, labels: Vec<String>, bruto: Vec<u8>) -> Response {
+fn resposta_import(
+    m: &Mock,
+    conta: String,
+    tipo: &str,
+    labels: Vec<String>,
+    bruto: Vec<u8>,
+) -> Response {
     let mut e = m.lock().unwrap();
     match e.modo {
         Modo::Erro500 => {
@@ -134,6 +146,7 @@ fn resposta_import(m: &Mock, tipo: &str, labels: Vec<String>, bruto: Vec<u8>) ->
     }
     let id = format!("gm{}", e.imports.len() + 1);
     e.imports.push(Import {
+        conta,
         tipo: tipo.into(),
         labels,
         bruto,
@@ -181,9 +194,9 @@ async fn importar(
         e.atrasos.pop_front().unwrap_or(e.atraso)
     };
     tokio::time::sleep(atraso).await;
-    if !autorizado(&m, &h) {
+    let Some(conta) = autorizado(&m, &h) else {
         return StatusCode::UNAUTHORIZED.into_response();
-    }
+    };
     assert_eq!(
         q.get("internalDateSource").map(String::as_str),
         Some("dateHeader")
@@ -198,7 +211,7 @@ async fn importar(
     match q.get("uploadType").map(String::as_str) {
         Some("multipart") => {
             let (labels, bruto) = partes_multipart(&tipo_c, &corpo);
-            resposta_import(&m, "multipart", labels, bruto)
+            resposta_import(&m, conta, "multipart", labels, bruto)
         }
         Some("resumable") => {
             assert_eq!(h.get("X-Upload-Content-Type").unwrap(), "message/rfc822");
@@ -211,7 +224,7 @@ async fn importar(
                 .collect();
             let mut e = m.lock().unwrap();
             let id = format!("s{}", e.sessoes.len() + 1);
-            e.sessoes.insert(id.clone(), labels);
+            e.sessoes.insert(id.clone(), (conta, labels));
             let local = e.endereco.unwrap();
             (
                 StatusCode::OK,
@@ -228,13 +241,13 @@ async fn sessao(
     Caminho(id): Caminho<String>,
     corpo: axum::body::Bytes,
 ) -> Response {
-    let labels = m
+    let (conta, labels) = m
         .lock()
         .unwrap()
         .sessoes
         .remove(&id)
         .expect("sessão resumable");
-    resposta_import(&m, "resumable", labels, corpo.to_vec())
+    resposta_import(&m, conta, "resumable", labels, corpo.to_vec())
 }
 
 async fn subir_mock() -> (Mock, SocketAddr) {
@@ -245,7 +258,7 @@ async fn subir_mock() -> (Mock, SocketAddr) {
         imports: Vec::new(),
         labels: Vec::new(),
         tokens: 0,
-        token_valido: None,
+        token_valido: HashMap::new(),
         sessoes: HashMap::new(),
         endereco: None,
         pedidos_import: 0,
@@ -690,7 +703,10 @@ async fn gmail_fora_do_ar_fica_na_fila_e_entra_depois() {
     );
     assert!(ate(2, || a.fila() == 0).await);
     let prom = std::fs::read_to_string(a.dir.join("carteiro.prom")).unwrap();
-    assert!(prom.contains("carteiro_token_ok 1"));
+    assert!(
+        prom.contains("carteiro_token_ok{caixa=\"principal\"} 1"),
+        "{prom}"
+    );
 }
 
 #[tokio::test]
@@ -805,7 +821,7 @@ async fn token_renovado_depois_de_401() {
     );
     assert_eq!(a.mock.lock().unwrap().tokens, 1);
     // o Google invalida o access token antes da validade
-    a.mock.lock().unwrap().token_valido = None;
+    a.mock.lock().unwrap().token_valido.clear();
     let mut c = a.cliente().await;
     let (cod, r) = c
         .mandar("a@exemplo.com", &["pix@exemplo.com"], &mensagem("t2"))
@@ -920,4 +936,145 @@ async fn limite_diario_de_labels_novas() {
     assert!(a.label_id("contato/b").is_none(), "passou do limite do dia");
     let i = a.imports();
     assert_eq!(i[1].labels[2], a.label_id("contato").unwrap());
+}
+
+/// A forma curta da config do [`ambiente`] vira a caixa `eu`, e `outra`
+/// (outro.app, conta `rt-outra`) recebe `suporte@`.
+fn duas_caixas(c: &mut Config) {
+    let token = c.token.take().unwrap();
+    let outra = token.with_file_name("token-outra.json");
+    std::fs::write(&outra, r#"{"refresh_token":"rt-outra"}"#).unwrap();
+    let cliente = c.cliente_oauth.take().unwrap();
+    c.caixas = vec![
+        Caixa {
+            nome: "eu".into(),
+            dominio: c.dominio.take().unwrap(),
+            enderecos: c.enderecos.take().unwrap(),
+            cliente_oauth: cliente.clone(),
+            token,
+        },
+        Caixa {
+            nome: "outra".into(),
+            dominio: "outro.app".into(),
+            enderecos: vec!["suporte".into()],
+            cliente_oauth: cliente,
+            token: outra,
+        },
+    ];
+}
+
+#[tokio::test]
+async fn cada_caixa_na_sua_conta() {
+    let a = ambiente(duas_caixas).await;
+    let mut c = a.cliente().await;
+    let (cod, r) = c
+        .mandar(
+            "alguem@exemplo.com",
+            &["Suporte+Loja@Outro.App"],
+            &mensagem("suporte"),
+        )
+        .await;
+    assert_eq!(cod, 250, "{r}");
+    let (cod, r) = c
+        .mandar(
+            "alguem@exemplo.com",
+            &["contato@exemplo.com"],
+            &mensagem("eu"),
+        )
+        .await;
+    assert_eq!(cod, 250, "{r}");
+    let i = a.imports();
+    assert_eq!(i.len(), 2);
+    assert_eq!(i[0].conta, "rt-outra");
+    assert_eq!(i[1].conta, "rt-teste");
+    let suporte = a.label_id("suporte/loja").unwrap();
+    assert_eq!(i[0].labels, ["INBOX", "UNREAD", suporte.as_str()]);
+    let bruto = String::from_utf8(i[0].bruto.clone()).unwrap();
+    assert_eq!(
+        cabecalho(&bruto, "Delivered-To"),
+        ["Delivered-To: suporte+loja@outro.app"]
+    );
+
+    // endereço de uma caixa no domínio da outra, e domínio de ninguém
+    assert_eq!(c.cmd("MAIL FROM:<alguem@exemplo.com>").await.0, 250);
+    let (_, r) = c.cmd("RCPT TO:<contato@outro.app>").await;
+    assert!(r.starts_with("550 5.1.1"), "{r}");
+    let (_, r) = c.cmd("RCPT TO:<suporte@terceiro.app>").await;
+    assert!(r.starts_with("550 5.7.1"), "{r}");
+    assert_eq!(c.cmd("RSET").await.0, 250);
+    let (_, r) = c.cmd("EHLO outro.app").await;
+    assert!(r.starts_with("550"), "HELO com o domínio de uma caixa: {r}");
+
+    // gravado na subida
+    let prom = std::fs::read_to_string(a.dir.join("carteiro.prom")).unwrap();
+    assert!(prom.contains("carteiro_token_ok{caixa=\"eu\"} 1"), "{prom}");
+    assert!(
+        prom.contains("carteiro_token_ok{caixa=\"outra\"} 1"),
+        "{prom}"
+    );
+}
+
+#[tokio::test]
+async fn duas_caixas_na_mesma_transacao_viram_duas_entregas() {
+    let a = ambiente(duas_caixas).await;
+    let mut c = a.cliente().await;
+    assert_eq!(c.cmd("EHLO cliente.exemplo.com").await.0, 250);
+    assert_eq!(c.cmd("MAIL FROM:<alguem@exemplo.com>").await.0, 250);
+    assert_eq!(c.cmd("RCPT TO:<contato@exemplo.com>").await.0, 250);
+    let (cod, r) = c.cmd("RCPT TO:<suporte@outro.app>").await;
+    assert_eq!(cod, 452, "{r}");
+    assert!(r.starts_with("452 4.5.3"), "{r}");
+    assert_eq!(
+        c.cmd("RCPT TO:<pix@exemplo.com>").await.0,
+        250,
+        "a mesma caixa segue"
+    );
+    assert_eq!(c.cmd("DATA").await.0, 354);
+    c.enviar(&mensagem("primeira")).await;
+    c.enviar(b".\r\n").await;
+    assert_eq!(c.resposta().await.0, 250);
+    // o que quem envia faz depois do 452: o resto numa transação nova
+    let (cod, _) = c
+        .mandar(
+            "alguem@exemplo.com",
+            &["suporte@outro.app"],
+            &mensagem("resto"),
+        )
+        .await;
+    assert_eq!(cod, 250);
+    let i = a.imports();
+    assert_eq!(i.len(), 2);
+    assert_eq!(i[0].conta, "rt-teste");
+    assert_eq!(i[1].conta, "rt-outra");
+    let bruto = String::from_utf8(i[0].bruto.clone()).unwrap();
+    assert_eq!(cabecalho(&bruto, "Delivered-To").len(), 2);
+}
+
+#[tokio::test]
+async fn token_recusado_numa_caixa_nao_para_a_outra() {
+    let a = ambiente(|c| {
+        duas_caixas(c);
+        std::fs::write(&c.caixas[1].token, r#"{"refresh_token":"rt-revogado"}"#).unwrap();
+    })
+    .await;
+    let mut c = a.cliente().await;
+    let (cod, r) = c
+        .mandar("alguem@exemplo.com", &["suporte@outro.app"], &mensagem("x"))
+        .await;
+    assert_eq!(cod, 250, "{r}");
+    assert!(r.contains("queued as"), "fica na fila: {r}");
+    let (cod, r) = c
+        .mandar(
+            "alguem@exemplo.com",
+            &["contato@exemplo.com"],
+            &mensagem("y"),
+        )
+        .await;
+    assert!(r.contains("delivered as"), "{r}");
+    assert_eq!(cod, 250);
+    assert_eq!(a.imports().len(), 1);
+    assert_eq!(a.fila(), 2, "só a da caixa outra");
+    let entrega = &a.servidor.as_ref().unwrap().contexto.entrega;
+    assert!(!entrega.conta("outra").unwrap().token_ok());
+    assert!(entrega.conta("eu").unwrap().token_ok());
 }
